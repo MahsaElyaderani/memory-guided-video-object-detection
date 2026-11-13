@@ -23,6 +23,9 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 RESULTS_DIR = PROJECT_ROOT / "results"
 MATCHED_TRAIN_SUBSET = PROJECT_ROOT / "splits/train_25pct.json"
 TIMM_CACHE = WEIGHTS_DIR / "timm"
+DELTA_ROOT = PROJECT_ROOT.parent / "delta-distillation-fork"
+DELTA_TEACHER_CHECKPOINT = PROJECT_ROOT.parent / "delta-distillation-main/checkpoints/test/efficientdet_d0.pth"
+P4_VALIDATION_MANIFEST = PROJECT_ROOT / "splits/val100x20_seed7.json"
 
 # Default validation data for training runs.
 TRAIN_VALIDATION_ANNOTATIONS = VAL_ANNOTATIONS

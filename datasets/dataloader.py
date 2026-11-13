@@ -82,7 +82,7 @@ class SeededSamples(Dataset):
             random.setstate(state)
 
 
-def budget_loader(dataset, args, epoch, start_batch, batches):
+def budget_loader(dataset, args, epoch, start_batch, batches, *, collate_fn=None):
     """Rebuild only the unconsumed slice of a deterministic epoch permutation."""
     from .classification import classification_collate
     seed = args.seed + epoch
@@ -100,5 +100,5 @@ def budget_loader(dataset, args, epoch, start_batch, batches):
     return DataLoader(SeededSamples(dataset, seed), sampler=indices, batch_size=args.batch_size,
                       num_workers=args.num_workers, drop_last=True, generator=generator,
                       pin_memory=torch.device(args.device).type == 'cuda',
-                      collate_fn=classification_collate if args.task == 'classification' else video_collate_fn,
+                      collate_fn=collate_fn or (classification_collate if args.task == 'classification' else video_collate_fn),
                       **options)

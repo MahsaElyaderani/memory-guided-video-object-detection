@@ -213,9 +213,7 @@ class TrainTransform:
             copied["boxes"] = flipped
         return copied
 
-    def __call__(
-        self, images: Sequence[Image.Image], targets: Sequence[Target]
-    ) -> Tuple[Tensor, List[Target]]:
+    def augment(self, images, targets):
         if not images:
             raise ValueError("A clip must contain at least one image.")
         normalized_targets = _prepare_targets_normalized(images, targets)
@@ -251,6 +249,12 @@ class TrainTransform:
             working_images = [TF.hflip(im) for im in working_images]
             working_targets = [self._apply_flip_to_target(t) for t in working_targets]
 
+        return working_images, working_targets
+
+    def __call__(
+        self, images: Sequence[Image.Image], targets: Sequence[Target]
+    ) -> Tuple[Tensor, List[Target]]:
+        working_images, working_targets = self.augment(images, targets)
         frames = stack_frames(
             [resize_detection_views(im, self.image_size, self.interpolation, self.paired) for im in working_images], dim=0
         )

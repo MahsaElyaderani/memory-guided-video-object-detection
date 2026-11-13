@@ -192,7 +192,7 @@ MobileNetV1 is no longer supported by the active code. Its checkpoints require
 the archived version; existing MobileNetV2 and EfficientNet checkpoint formats
 are preserved. Local archives, datasets, and checkpoint weights are not published.
 
-## Frozen EfficientDet keyframe experiment
+## Attention-based Memory
 
 This detection experiment asks whether the last keyframe helps TinyNet-D detect
 objects on intervening frames. Both variants use TinyNet-D through `blocks.4`
@@ -240,7 +240,12 @@ every tenth frame after it use the teacher. **Best means highest COCO AP50 on
 student frames** because those are the frames where the variants differ.
 Evaluation also reports whole-sequence AP50 and continuous AP50. The trainer
 stores each variant's history in `RUNS_DIR/p4_student/{none,p4}/detection.pt`.
-The shared history launcher currently displays matched-model checkpoints only.
+Run the following command from the project root to compare the best student-frame
+COCO AP50, epoch, and update for each variant with a saved checkpoint:
+
+```bash
+bash launchers/show_train_history.sh "$(python path.py --get RUNS_DIR)/p4_student"
+```
 
 **Reading the code.** Start with `models/p4_student.py` for fusion and
 `models/efficientdet_teacher.py` for P4 extraction. In `train_p4_student.py`,

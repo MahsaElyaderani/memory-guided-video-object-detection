@@ -18,12 +18,16 @@ from utils.runtime import load_checkpoint
 def show_history(checkpoint_path):
     checkpoint = load_checkpoint(checkpoint_path)
     stage = checkpoint.get("stage")
-    if stage not in ("matched_classification", "matched_detection"):
+    if stage not in ("matched_classification", "matched_detection", "p4_student_v1"):
         return
     task = stage.removeprefix("matched_")
     metric = checkpoint.get("selection_metric", "micro_ap" if task == "classification" else "mAP@0.5")
     budget = checkpoint.get("budget", {})
-    print(f"\n{'=' * 65}\n{checkpoint.get('experiment')}: {task}")
+    model = checkpoint.get("experiment", "?")
+    if stage == "p4_student_v1":
+        task, model = "detection", f"TinyNet-D (memory={checkpoint['memory']})"
+        budget = dict(updates=checkpoint["updates"], total_updates=checkpoint["scheduler"]["T_max"])
+    print(f"\n{'=' * 65}\n{model}: {task}")
     print(f"Checkpoint: {checkpoint_path}")
     print(f"Saved epoch: {checkpoint.get('epoch')}")
     print(f"Updates: {budget.get('updates')} / {budget.get('total_updates')}")
@@ -40,9 +44,12 @@ def show_history(checkpoint_path):
         if origin is not None:
             print("\n[New subset continuation]" if row.get("update", 0) > origin else "\n[Inherited history]")
         print(f"\nEpoch {row.get('epoch')}, update {row.get('update', 'not recorded')}")
-        print("Training:", row.get("train", "not recorded"))
+        if stage == "p4_student_v1":
+            print("Training loss:", row["train_loss"])
+        else:
+            print("Training:", row.get("train", "not recorded"))
         validation = row.get("validation", {})
-        for key in ("micro_ap", "bce_loss") if task == "classification" else ("mAP@0.5",):
+        for key in ("micro_ap", "bce_loss") if task == "classification" else (metric,):
             score = validation.get(key)
             if score is not None:
                 print(f"Validation {key}: {score:.6f}" + (f" ({100 * score:.2f}%)" if key != "bce_loss" else ""))
@@ -55,11 +62,12 @@ def show_history(checkpoint_path):
         best = (min if metric == "bce_loss" else max)(scored, key=lambda r: r["validation"][metric])
         print(f"\nBest validation {metric}: {best['validation'][metric]:.6f} "
               f"at epoch {best.get('epoch')}, update {best.get('update')}")
-    metric = "micro_ap" if task == "classification" else "mAP@0.5"
+    if task == "classification":
+        metric = "micro_ap"
     scored = [r for r in history if r.get("validation", {}).get(metric) is not None
               and math.isfinite(r['validation'][metric])]
     best = max(scored, key=lambda r: r['validation'][metric]) if scored else None
-    return (str(checkpoint_path.parent.relative_to(root)), checkpoint.get('experiment', '?'), metric,
+    return (str(checkpoint_path.parent.relative_to(root)), model, metric,
             f"{100 * best['validation'][metric]:.2f}%" if best else 'not recorded',
             str(best.get('epoch', '-')) if best else '-', str(best.get('update', '-')) if best else '-',
             'inherited' if best and origin is not None and best.get('update', 0) <= origin else 'current')

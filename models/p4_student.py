@@ -25,6 +25,7 @@ class P4Student(nn.Module):
             backbone.network.load_state_dict(source.network.state_dict(), strict=True)
         net = backbone.network
         self.stem = nn.Sequential(net.conv_stem, net.bn1)
+        # blocks.4 already supplies 64 channels at stride 16 for the memory comparison.
         self.blocks = net.blocks[:5]
         self.register_buffer('mean', backbone.input_mean)
         self.register_buffer('std', backbone.input_std)
@@ -46,6 +47,8 @@ class P4Student(nn.Module):
         student = self.blocks(self.stem(((frames + 1) * .5 - self.mean) / self.std))
         if self.memory == 'p4':
             keys, values, valid = cache
+            # Each of 100 student locations reads the valid P4 locations. Normalize for
+            # matching, then add the retrieved raw values on the current frame grid.
             query = F.normalize(student.flatten(2).transpose(1, 2), dim=-1)
             # Cosine logits with fixed inverse temperature sqrt(64).
             scores = (query @ keys) * 8.

@@ -50,22 +50,40 @@ Initial backbone training downloads pretrained weights through timm.
 
 ## Train and evaluate
 
-Choose one family; each command trains its small standalone, big standalone,
-and joint experiments, then evaluates their best detection checkpoints:
+Run commands from the project root. Choose one family; each launcher processes
+small standalone, big standalone, then joint. It activates the `vision` environment.
+
+Train only (repeating a command resumes its default run):
 
 ```bash
-bash launchers/run_train_evaluate.sh mobilenetv2
-bash launchers/run_train_evaluate.sh efficientnet
-bash launchers/run_train_evaluate.sh edgenext
-```
-
-The optional second argument is `all` (default), `train`, or `eval`:
-
-```bash
+bash launchers/run_train_evaluate.sh mobilenetv2 train
+bash launchers/run_train_evaluate.sh efficientnet train
 bash launchers/run_train_evaluate.sh edgenext train
-bash launchers/run_train_evaluate.sh edgenext eval
 ```
 
+Resume an existing run, including one created by an older launcher. Replace each
+`EXISTING_..._RUN` with its folder name directly under `RUNS_DIR`, without `/seed_0`:
+
+```bash
+RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_train_evaluate.sh mobilenetv2 train
+RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_train_evaluate.sh efficientnet train
+RUN_NAME="EXISTING_EDGENEXT_RUN" bash launchers/run_train_evaluate.sh edgenext train
+```
+
+Resume loads latest `classification.pt` and `detection.pt`, skips completed stages,
+and trains missing experiments. Preserve the original subset, budget, batch sizes,
+worker count, and validation settings; incompatible resumes are rejected.
+
+Evaluate the same existing runs using their best detection checkpoints:
+
+```bash
+RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_train_evaluate.sh mobilenetv2 eval
+RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_train_evaluate.sh efficientnet eval
+RUN_NAME="EXISTING_EDGENEXT_RUN" bash launchers/run_train_evaluate.sh edgenext eval
+```
+
+Omit `RUN_NAME` to evaluate a default run. Use `all` instead of `train` or `eval`
+to train/resume and then evaluate; `all` is also the default when omitted.
 Evaluation-only mode requires all three best detection checkpoints and never
 runs training. Each evaluation creates a new results directory.
 
@@ -93,7 +111,9 @@ start an independent repeat. Different manifests with the same filename need
 separate `RUN_NAME` values; the trainer still rejects incompatible resumes. To evaluate
 an existing run with different validation coverage, set `RUN_NAME` to that run explicitly. Continuing an existing
 25% checkpoint on 50% with its optimizer/schedule is the separate
-`launchers/run_joint_subset50.sh` workflow.
+`launchers/run_joint_subset50.sh` workflow for joint MobileNetV2. It starts from the
+best validated detector with cosine updates remaining. The new run inherits the
+optimizer, update count and best score. Later invocations resume its latest checkpoint.
 
 | Family | Small / big / joint experiments |
 | --- | --- |
@@ -121,7 +141,10 @@ latest `classification.pt` and `detection.pt`, including mid-epoch progress.
 Keep the saved training budget and settings unchanged when resuming.
 
 Fresh detection starts from `classification_best.pt`. Best checkpoints use
-highest classification micro AP or detection mAP@0.5; final evaluation loads
+highest classification micro AP (final recurrent step) or continuous detection
+mAP@0.5. Classification trains with multi-label BCE at all three steps. Joint
+detection training samples a backbone independently per example and frame with
+equal probability. Only big calls commit the shared memory. Final evaluation loads
 `detection_best.pt`. Evaluation JSON files go to a timestamped family folder under
 `RESULTS_DIR`. All paths are configured in `path.py`.
 
@@ -144,9 +167,85 @@ bash launchers/show_train_history.sh
 
 Pass a run folder as the first argument to limit the report to that run.
 
+Show classification and detection history for each family's default 25% run:
+
+```bash
+conda activate vision
+RUNS="$(python path.py --get RUNS_DIR)"
+bash launchers/show_train_history.sh "$RUNS/shared_mobilenetv2_subset25_class5_linear_det100_cosine/seed_0"
+bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine/seed_0"
+bash launchers/show_train_history.sh "$RUNS/shared_edgenext_subset25_class5_linear_det100_cosine/seed_0"
+```
+
+For just one model, append its experiment name from the family table above:
+
+```bash
+bash launchers/show_train_history.sh "$RUNS/shared_edgenext_subset25_class5_linear_det100_cosine/seed_0/joint_edgenext"
+```
+
+For an older or custom run, replace the run folder with its actual name. For a
+default 50% run, replace `subset25` with `subset50`. The report reads the latest
+saved checkpoints, includes best validation scores, learning rates and remaining
+updates, and skips models without checkpoints. It can run while training continues.
+
 MobileNetV1 is no longer supported by the active code. Its checkpoints require
 the archived version; existing MobileNetV2 and EfficientNet checkpoint formats
 are preserved. Local archives, datasets, and checkpoint weights are not published.
 
-Local `docs/`, `results/`, `runs/`, `scripts/`, and `tests/` folders are excluded
-from Git. Supported training, evaluation, and history Bash scripts live in `launchers/`.
+## Frozen EfficientDet keyframe experiment
+
+This detection experiment asks whether the last keyframe helps TinyNet-D detect
+objects on intervening frames. Both variants use TinyNet-D through `blocks.4`
+on a 160×160 frame. The student feature map is 64×10×10. The frozen
+EfficientDet-D0 teacher processes a padded 512×512 keyframe and supplies its
+64×32×32 P4 map. Each variant uses one 64→256 projection before the SSD pyramid.
+
+| Trainer mode | Input to the projection | Prediction on keyframes |
+| --- | --- | --- |
+| `none` | Current student features | Teacher detections |
+| `p4` | Current features plus a spatially weighted sum of cached P4 values | Teacher detections |
+
+**Setup.** Set `DELTA_ROOT` to the Delta Distillation checkout containing the
+project-specific `baseline/evaluate_tracking.py`, its sibling `tracking.py`,
+and the fork's `lib/` directory. The adapter calls that baseline's `load_model`
+and `records` functions. Set `DELTA_TEACHER_CHECKPOINT` to the released VID
+`checkpoints/test/efficientdet_d0.pth`. The fork uses OmegaConf 2.3.0 and the
+scorer needs pycocotools in the active environment. Set `P4_VALIDATION_MANIFEST`
+to `splits/val100x20_seed7.json` and use its matching validation annotations.
+See the [Delta Distillation release](https://github.com/Qualcomm-AI-research/delta-distillation/releases/tag/v1.0)
+for the weights.
+
+**Initialization.** In `launchers/run_p4_student.sh`, set `BEST` to the trained
+joint EfficientNet/TinyNet-D detection checkpoint. On first use the launcher
+pins it with a hard link at `RUNS_DIR/p4_student/joint_init.pt` so both variants
+start from the same weights. The student inherits the TinyNet-D stem and blocks
+through `blocks.4`, the SSD pyramid and predictors. Its 64→256 projection starts
+fresh. The Python trainer also accepts a matched `small_tinynet_d` detection
+checkpoint via `--init-detector`.
+
+```bash
+bash launchers/run_p4_student.sh train  # Start or resume both from their own detection.pt
+bash launchers/run_p4_student.sh eval   # Evaluate each detection_best.pt on CUDA
+```
+
+**Training and selection.** The trainer reads `MATCHED_TRAIN_SUBSET` (25% by
+default), divides videos into non-overlapping 10-frame windows, and samples one
+student frame 1–9 frames after each keyframe. Both images share a crop and flip,
+and the student frame supplies the detection targets. The default budget is
+100 epochs with batch size 4 and cosine decay from 0.001. Validation runs every
+5,000 optimizer updates and at the final update.
+
+At validation, the cache resets at each video's selected window. Frame 1 and
+every tenth frame after it use the teacher. **Best means highest COCO AP50 on
+student frames** because those are the frames where the variants differ.
+Evaluation also reports whole-sequence AP50 and continuous AP50. The trainer
+stores each variant's history in `RUNS_DIR/p4_student/{none,p4}/detection.pt`.
+The shared history launcher currently displays matched-model checkpoints only.
+
+**Reading the code.** Start with `models/p4_student.py` for fusion and
+`models/efficientdet_teacher.py` for P4 extraction. In `train_p4_student.py`,
+`TrainingPairs` defines sampling and `evaluate` defines routing and scoring.
+The shared scorer and manifest reader live in `scripts/compare_vid.py`.
+
+Local results, runs, checkpoints and tests are excluded from Git. Supported
+launchers live in `launchers/`.

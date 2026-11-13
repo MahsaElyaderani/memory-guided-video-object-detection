@@ -39,6 +39,7 @@ class TrainingPairs(torch.utils.data.Dataset):
     def __getitem__(self, index):
         video, start = self.dataset.clip_index[index]
         records = self.dataset.images_by_video[video]
+        # Train on one of the nine student positions following a keyframe in a 10-frame window.
         gap = random.randint(1, 9)
         pair = [self.dataset._load_image_and_target(records[start + t]) for t in (0, gap)]
         images, targets = self.transform.augment(*zip(*pair))

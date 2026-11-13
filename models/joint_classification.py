@@ -52,7 +52,8 @@ class JointClassifier(nn.Module):
         reuse_features = (self.model_cfg.uses_timm
                           and self.paired_config.freeze_bn_stats)
         for step in range(steps):
-            # Repeated image: retain one backbone graph for all recurrent steps.
+            # Each step sees the same image. Reuse the features with their gradients attached
+            # so losses at all recurrent steps can update the backbone.
             if step == 0 or not reuse_features:
                 large = self.big_backbone(small if self.standalone == 'small' else big_frames(frames))
                 if self.standalone == 'small':

@@ -34,6 +34,7 @@ class EfficientDetTeacher:
         body = self.net.model
         detections = None
         if detect:
+            # FPN outputs start at P3. Capture P4 from the same pass that produces keyframe boxes.
             captured = []
             hook = body.fpn.register_forward_hook(lambda mod, inputs, outputs: captured.append(outputs[1]))
             try:

@@ -9,7 +9,7 @@ import shlex
 import uuid
 
 from train_paired_vod import parse_args as training_args
-from utils.paired_checkpoints import paired_from_payload
+from utils.lstm_checkpoints import paired_from_payload
 from utils.runtime import load_checkpoint, atomic_save_checkpoint, epoch_checkpoint_path
 from utils.checkpoints import model_from_checkpoint
 

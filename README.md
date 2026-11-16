@@ -165,7 +165,12 @@ Use `train_lstm_models.py` for current standalone and joint experiments.
 Frozen-big training is archived under `archives/frozen_big_20261116/`.
 Its checkpoints remain evaluable; resuming that training mode requires the archived source.
 `prepare_joint_training.py` now prepares trainable joint runs by default.
-`train_joint_pretrain.py` and `train_paired_vod.py` provide separate joint entry points.
+The older `train_joint_pretrain.py` command is archived locally under
+`archives/joint_pretrain_20261116/`, with a source snapshot for legacy training resume.
+Current classification pretraining uses `train_lstm_models.py --task classification`
+and the shared loop in `engine/classification_training.py`.
+Legacy `joint_pretrain` checkpoints remain loadable for detector initialization.
+`train_paired_vod.py` remains a separate joint detection entry point.
 The shared launcher replaces the older family launchers.
 
 Show saved classification and detection history while training:

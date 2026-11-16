@@ -23,8 +23,7 @@ from routing.predictions import sha256_file
 from scripts.compare_vid import load_manifest, score_predictions
 from train_lstm_models import model_from_matched, save_matched_checkpoints, seed_training
 from utils.checkpoints import capture_rng, restore_rng
-from utils.paired_checkpoints import run_lock
-from utils.runtime import load_checkpoint, tqdm
+from utils.runtime import run_lock, load_checkpoint, tqdm
 from vid_categories import vid_to_dataset_labels
 
 

@@ -18,8 +18,7 @@ if __package__ in (None, ""):
 else:
     from .compare_visual_runs import COMPARISON_KEYS, row_tensors, validate_runs
 from engine.visualizer import render_frame
-from utils.paired_checkpoints import write_json
-from utils.runtime import tqdm
+from utils.runtime import write_json, tqdm
 
 
 def compare_runs(run_paths, frames_root, output_dir, labels=None, threshold=.3, max_side=480,

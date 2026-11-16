@@ -9,7 +9,7 @@ def parse_args(argv=None, *, resume_payload=None):
     parser = argparse.ArgumentParser(description="Fine-tune two MobileNet branches with one shared native LSTM/SSD.")
     add_training_arguments(parser)
     parser.add_argument('--phase', choices=('joint_detection',), default='joint_detection',
-                        help='Joint detection training; classification pretraining uses train_joint_pretrain.py.')
+                        help='Joint detection training; current classification pretraining uses train_lstm_models.py --task classification.')
     parser.add_argument('--init-source', choices=('standalone_detection', 'joint_pretrain', 'fresh'),
                         default='standalone_detection',
                         help='Use a standalone detector, joint classifier, or fresh LSTM/heads.')

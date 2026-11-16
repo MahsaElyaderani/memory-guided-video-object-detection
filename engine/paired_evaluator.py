@@ -17,9 +17,8 @@ from routing.data import data_signature
 from utils.evaluation_data import load_frame, normalized_target, raw_detection_row
 from routing.paired_policy import VideoContext, choose_big, forced_big
 from routing.predictions import detection, filtered
-from utils.paired_checkpoints import detector_fingerprint, write_json
-from utils.runtime import tqdm
-from utils.runtime import LOSS_KEYS, loss_postfix
+from utils.lstm_checkpoints import detector_fingerprint
+from utils.runtime import write_json, tqdm, LOSS_KEYS, loss_postfix
 
 
 @dataclass(frozen=True)

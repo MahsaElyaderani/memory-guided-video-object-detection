@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import json
 import os
 import random
 import tempfile
@@ -115,3 +117,46 @@ def epoch_checkpoint_path(path, epoch):
     path = Path(path)
     suffix = path.suffix or ".pt"
     return path.with_name(f"{path.stem}_epoch_{epoch:04d}{suffix}")
+
+
+def write_json(payload, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(payload, stream, indent=2, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+@contextmanager
+def run_lock(destination):
+    path = Path(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = path.with_name(path.name + ".lock")
+    fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(str(os.getpid()))
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def save_training_payload(payload, destination):
+    numbered = epoch_checkpoint_path(destination, payload["epoch"])
+    if numbered.exists():
+        previous = load_checkpoint(numbered)
+        if previous.get("run_id") != payload["run_id"] or previous.get("epoch") != payload["epoch"]:
+            raise FileExistsError(f"Different run owns checkpoint {numbered}.")
+        if not previous.get("validation_pending"):
+            raise FileExistsError(f"Completed epoch checkpoint is immutable: {numbered}.")
+        atomic_save_checkpoint(payload, numbered)
+    else:
+        atomic_save_checkpoint(payload, numbered, overwrite=False)
+    atomic_save_checkpoint(payload, destination)

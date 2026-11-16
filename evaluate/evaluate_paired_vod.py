@@ -15,8 +15,8 @@ import torch
 from engine.paired_evaluator import EvaluationOptions, export_paired_run, select_paired_frames
 from paired_config import PolicyConfig, MemoryCorruption, PairedConfig
 from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
-from utils.paired_checkpoints import paired_from_payload, write_json
-from utils.runtime import load_checkpoint
+from utils.lstm_checkpoints import paired_from_payload
+from utils.runtime import write_json, load_checkpoint
 from utils.checkpoints import model_from_checkpoint
 from models.joint_lstm_detector import PairedVOD
 from routing.predictions import sha256_file

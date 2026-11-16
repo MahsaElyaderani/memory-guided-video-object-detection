@@ -20,13 +20,13 @@ from models.ssd_head import SSDFeatureMaps, SSDBoxPredictor
 from paired_config import PairedConfig, PolicyConfig
 from path import parse_paths, RUNS_DIR
 from routing.data import data_signature, guard_held_out
-from train_joint_pretrain import classification_epoch
+from engine.classification_training import classification_epoch
 from utils.checkpoints import capture_rng, restore_rng
 from utils.joint_initialization import make_joint_config
-from utils.paired_checkpoints import paired_metadata, run_lock
+from utils.lstm_checkpoints import paired_metadata
+from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint
 from routing.predictions import sha256_file
 from utils.resume import resume_defaults, saved_arguments, restore_optimizer
-from utils.runtime import load_checkpoint, atomic_save_checkpoint
 
 EXPERIMENTS = {'small_050': .5, 'big_120d': 1.2, 'joint_120d': 1.2,
                'small_tinynet_d': 1., 'big_efficientnet_b0': 1.,

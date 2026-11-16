@@ -34,8 +34,6 @@ def parse_args(argv=None, *, resume_payload=None):
     parser.add_argument("--rmsprop-eps", type=float, default=1.)
     parser.add_argument("--diagnostic-validation", action="store_true",
                         help="Also evaluate big-only, small-only, small zero-memory, and fixed without memory.")
-    parser.add_argument("--freeze-big-in-joint", action="store_true",
-                        help="During joint training freeze big backbone, shared LSTM/SSD and their BN stats; train only fast backbone/adapter on small frames, with only big frames committing memory.")
     parser.add_argument("--memory-corruption-probability", type=float, default=0.)
     parser.add_argument("--memory-dropout", type=float, default=.1)
     parser.add_argument("--memory-noise-std", type=float, default=.1)

@@ -29,7 +29,7 @@ def criterion_for(model):
                         box_coder_scales=BoxCoderScales(s.y_scale, s.x_scale, s.height_scale, s.width_scale))
 
 
-def detector_batch(model, frames, targets, criterion, corruption, freeze_big_in_joint=False):
+def detector_batch(model, frames, targets, criterion, corruption):
     big_mask, small_commit = random_training_schedule(
         frames.shape[0], frames.shape[1], frames.device)
     state, logits, boxes, corrupted = None, [], [], 0
@@ -40,17 +40,6 @@ def detector_batch(model, frames, targets, criterion, corruption, freeze_big_in_
         logits.append(output["class_logits"])
         boxes.append(output["box_regression"])
     logits, boxes = torch.stack(logits, 1), torch.stack(boxes, 1)
-    if freeze_big_in_joint:
-        # The frozen big detections initialize memory; supervise only the learning small path.
-        selected = ~big_mask
-        if not selected.any():
-            # A genuine random draw may select only big frames. Do not resample
-            # or take a zero-gradient optimizer step (RMSprop momentum can move weights).
-            return None, {"big_selections": int(big_mask.sum()),
-                          "corrupted_updates": corrupted}
-        logits, boxes = logits[selected], boxes[selected]
-        flat_targets = [target for clip in targets for target in clip]
-        targets = [flat_targets[index] for index in selected.flatten().nonzero().flatten().tolist()]
     loss = criterion({"class_logits": logits, "box_regression": boxes,
                       "anchors": output["anchors"]}, targets)
     return loss, {"big_selections": int(big_mask.sum()), "corrupted_updates": corrupted}
@@ -58,25 +47,17 @@ def detector_batch(model, frames, targets, criterion, corruption, freeze_big_in_
 
 def train_detector_epoch(model, loader, optimizer, criterion, args, epoch=1):
     phase = "joint"
-    freeze_big = getattr(args, "freeze_big_in_joint", False)
-    model.configure_detector_training(freeze_big=freeze_big)
+    model.configure_detector_training()
     totals, batches, selections, corrupted = dict.fromkeys(LOSS_KEYS, 0.), 0, 0, 0
-    skipped_batches = 0
     corruption = MemoryCorruption(args.memory_corruption_probability, args.memory_dropout, args.memory_noise_std)
-    description = f"Epoch {epoch} {phase}{' [big/shared frozen]' if freeze_big else ''} (current/mean)"
+    description = f"Epoch {epoch} {phase} (current/mean)"
     with tqdm(loader, desc=description, disable=args.no_progress) as bar:
         for batch_index, (frames, targets) in enumerate(bar, 1):
             frames = frames.to(args.device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            loss, info = detector_batch(model, frames, targets, criterion, corruption,
-                                        freeze_big_in_joint=freeze_big)
+            loss, info = detector_batch(model, frames, targets, criterion, corruption)
             selections += info["big_selections"]
             corrupted += info["corrupted_updates"]
-            if loss is None:
-                skipped_batches += 1
-                if args.max_batches is not None and batch_index >= args.max_batches:
-                    break
-                continue
             if not torch.isfinite(loss["total_loss"]):
                 raise FloatingPointError("Non-finite paired detector loss.")
             loss["total_loss"].backward()
@@ -98,8 +79,8 @@ def train_detector_epoch(model, loader, optimizer, criterion, args, epoch=1):
     print(f"Epoch {epoch} {phase} mean: " + ", ".join(
         f"{key}={totals[key]/batches:.4f}" for key in LOSS_KEYS), flush=True)
     return {**{key: value / batches for key, value in totals.items()}, "phase": phase, "optimizer_steps": batches,
-            "big_selections": selections, "corrupted_updates": corrupted, "skipped_batches": skipped_batches,
-            "big_shared_frozen": freeze_big}
+            "big_selections": selections, "corrupted_updates": corrupted, "skipped_batches": 0,
+            "big_shared_frozen": False}
 
 
 def add_training_arguments(parser):
@@ -298,7 +279,7 @@ def train_pair(args):
     definition["arguments"]["validation_interval"] = definition["arguments"].pop("big_call_interval")
     # New opt-in controls should not invalidate legacy run definitions at their defaults.
     defaults = {"backbone": None, "big_width_mult": None, "random_backbones": False, "fast_bn_momentum": None, "reset_fast_bn": False, "fast_learning_rate": None,
-                "rmsprop_eps": 1., "diagnostic_validation": False, "freeze_big_in_joint": False}
+                "rmsprop_eps": 1., "diagnostic_validation": False}
     for key, default in defaults.items():
         if definition["arguments"].get(key) == default:
             definition["arguments"].pop(key, None)
@@ -319,7 +300,6 @@ def train_pair(args):
         parameters = [{"params": model.big.parameters(), "lr": lr},
                       {"params": list(model.fast_backbone.parameters()) + list(model.small_projection.parameters()),
                        "lr": args.fast_learning_rate if args.fast_learning_rate is not None else lr}]
-    # Include frozen parameters so optimizer groups stay stable across phases and resume.
     optimizer = torch.optim.RMSprop(parameters, lr=lr, alpha=.9, momentum=.9, eps=args.rmsprop_eps)
     if not math.isfinite(lr) or lr <= 0:
         raise ValueError("Learning rate must be finite and positive.")

@@ -158,6 +158,9 @@ python -m evaluate.evaluate_paired_vod --help
 The earlier `standalone_pretrain` / `standalone_detection` trainer is archived locally
 under `archives/standalone_stages_20261116/` (source snapshot included).
 Use `train_matched.py` for current standalone and joint experiments.
+Frozen-big training is archived under `archives/frozen_big_20261116/`.
+Its checkpoints remain evaluable; resuming that training mode requires the archived source.
+`prepare_joint_training.py` now prepares trainable joint runs by default.
 `train_joint_pretrain.py` and `train_paired_vod.py` provide separate joint entry points.
 The shared launcher replaces the older family launchers.
 

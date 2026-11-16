@@ -87,8 +87,6 @@ class PairedVOD(nn.Module):
             for module in self.modules():
                 if isinstance(module, nn.modules.batchnorm._BatchNorm):
                     module.eval()
-        if mode and getattr(self, "_freeze_big", False):
-            self.big.eval()
         if mode and self.paired_config.fast_bn_momentum is not None:
             for module in self.fast_backbone.modules():
                 if isinstance(module, nn.modules.batchnorm._BatchNorm):
@@ -96,13 +94,9 @@ class PairedVOD(nn.Module):
                     module.train(True)
         return self
 
-    def configure_detector_training(self, freeze_big=False):
-        self._freeze_big = freeze_big
+    def configure_detector_training(self):
         for parameter in self.parameters():
             parameter.requires_grad_(True)
-        if freeze_big:
-            for parameter in self.big.parameters():
-                parameter.requires_grad_(False)
         return self.train(True)
 
     def reset_fast_bn_stats(self):

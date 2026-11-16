@@ -33,6 +33,8 @@ def resume_defaults(parser, args, argv=None, payload=None):
         args.epochs = payload['budget']['epochs']
     saved = dict(payload.get("run_definition", {}).get("arguments", {}))
     saved.update(payload.get("resume_arguments", {}))
+    if saved.get("freeze_big_in_joint", False):
+        raise ValueError('Frozen-big training is archived; use the archived source to resume this checkpoint.')
     if "paired_config" in payload:
         saved.update(payload["paired_config"])
         saved["train_bn"] = not payload["paired_config"].get("freeze_bn_stats", True)

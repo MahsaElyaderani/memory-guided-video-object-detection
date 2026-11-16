@@ -97,6 +97,8 @@ def validate_random_training_resume(payload):
                          '(version 3); refusing to change its training behavior on resume.')
 
     arguments = {**definition.get('arguments', {}), **payload.get('resume_arguments', {})}
+    if arguments.get('freeze_big_in_joint', False):
+        raise ValueError('Frozen-big training is archived; use the archived source to resume this checkpoint.')
     warmup_end = arguments.get('zero_memory_epochs', 0) + arguments.get('clean_memory_epochs', 0)
     if payload.get('epoch', 0) < warmup_end:
         raise ValueError('Checkpoint has unfinished small-model warmup, which has been removed. '

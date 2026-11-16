@@ -14,9 +14,9 @@ from utils.runtime import load_checkpoint, atomic_save_checkpoint, epoch_checkpo
 from utils.checkpoints import model_from_checkpoint
 
 
-def prepare(source, destination, epochs, joint_mode='frozen', big_checkpoint=None):
-    if joint_mode not in ('frozen', 'trainable'):
-        raise ValueError('Joint mode must be frozen or trainable.')
+def prepare(source, destination, epochs, joint_mode='trainable', big_checkpoint=None):
+    if joint_mode != 'trainable':
+        raise ValueError('Frozen-big training is archived; joint mode must be trainable.')
     source, destination = Path(source).resolve(), Path(destination).resolve()
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     original = load_checkpoint(source)
@@ -67,8 +67,6 @@ def prepare(source, destination, epochs, joint_mode='frozen', big_checkpoint=Non
     for key in ('schedules', 'zero_memory_epochs', 'clean_memory_epochs', 'warmup_interval'):
         definition['arguments'].pop(key, None)
     definition['arguments'].pop('freeze_big_in_joint', None)
-    if joint_mode == 'frozen':
-        definition['arguments']['freeze_big_in_joint'] = True
     definition['random_schedule_version'] = 3
     parent = {'checkpoint': str(source), 'sha256': digest, 'epoch': original['epoch'],
               'run_id': original['run_id'], 'change': f'random 50/50 joint training, big/shared {joint_mode}',
@@ -111,7 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--checkpoint-out', required=True)
     parser.add_argument('--epochs', type=int, required=True)
-    parser.add_argument('--joint-mode', choices=('frozen', 'trainable'), default='frozen')
+    parser.add_argument('--joint-mode', choices=('trainable',), default='trainable')
     parser.add_argument('--big-checkpoint',
                         help='Replace big backbone and shared LSTM/SSD from native stage2; reset optimizer accumulators.')
     args = parse_paths(parser, "prepare_joint_training")

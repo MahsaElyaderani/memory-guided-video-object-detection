@@ -56,7 +56,6 @@ PREJOINT_PAIR_DIR = None
 PREJOINT_BIG = None
 PREJOINT_OUTPUT = None  # Must be a fresh directory; original overwrite protection applies.
 RESUME_JOINT = None
-RESUME_FROZEN_BIG = None
 
 
 def resolve_path(value):

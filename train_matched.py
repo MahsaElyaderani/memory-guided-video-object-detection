@@ -28,8 +28,7 @@ from routing.predictions import sha256_file
 from utils.resume import resume_defaults, saved_arguments, restore_optimizer
 from utils.runtime import load_checkpoint, atomic_save_checkpoint
 
-EXPERIMENTS = {'small_050': .5, 'big_100': 1., 'big_110d': 1.1, 'big_120d': 1.2,
-               'joint_100': 1., 'joint_110d': 1.1, 'joint_120d': 1.2,
+EXPERIMENTS = {'small_050': .5, 'big_120d': 1.2, 'joint_120d': 1.2,
                'small_tinynet_d': 1., 'big_efficientnet_b0': 1.,
                'joint_efficientnet_b0_tinynet_d': 1.}
 

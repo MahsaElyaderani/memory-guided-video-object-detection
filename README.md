@@ -9,7 +9,7 @@ joint mode. Backbone weights are ImageNet-pretrained; SSD heads are trained here
 
 | Model family | Small backbone (160×160) | Big backbone (320×320) |
 | --- | --- | --- |
-| MobileNetV2 | `mobilenetv2_050.lamb_in1k` | `mobilenetv2_100.ra_in1k`, `mobilenetv2_110d.ra_in1k`, or `mobilenetv2_120d.ra_in1k` |
+| MobileNetV2 | `mobilenetv2_050.lamb_in1k` | `mobilenetv2_120d.ra_in1k` |
 | EfficientNet / TinyNet | `tinynet_d.in1k` | `efficientnet_b0.ra_in1k` |
 
 Backbones are implemented in `models/backbones.py`. Both families use a 1280-channel
@@ -192,6 +192,10 @@ are preserved. Local archives, datasets, and checkpoint weights are not publishe
 
 EdgeNeXt source and tests are archived locally in `archives/edgenext_20261116/`.
 Use that source snapshot to train, evaluate, or resume existing EdgeNeXt checkpoints.
+
+The matched `big_100`, `big_110d`, `joint_100`, and `joint_110d` experiments are archived
+in `archives/mobilenet_variants_20261116/`. Use that source snapshot for their training,
+evaluation, or resume. Low-level MobileNetV2 backbone support remains available.
 
 ## Attention-based Memory
 

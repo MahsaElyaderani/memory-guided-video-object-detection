@@ -3,19 +3,17 @@
 PyTorch video object detection inspired by *Looking Fast and Slow: Memory-Guided
 Mobile Video Object Detection*. The project combines pretrained image backbones,
 recurrent memory, and SSD detection heads for the 30 ImageNet VID classes.
-It supports timm MobileNetV2, EfficientNet-B0/TinyNet-D, and EdgeNeXt, with standalone
-and joint models. All three families use a shared ConvLSTM and SSD detection heads in
+It supports timm MobileNetV2 and EfficientNet-B0/TinyNet-D, with standalone
+and joint models. Both families use a shared ConvLSTM and SSD detection heads in
 joint mode. Backbone weights are ImageNet-pretrained; SSD heads are trained here.
 
 | Model family | Small backbone (160×160) | Big backbone (320×320) |
 | --- | --- | --- |
 | MobileNetV2 | `mobilenetv2_050.lamb_in1k` | `mobilenetv2_100.ra_in1k`, `mobilenetv2_110d.ra_in1k`, or `mobilenetv2_120d.ra_in1k` |
 | EfficientNet / TinyNet | `tinynet_d.in1k` | `efficientnet_b0.ra_in1k` |
-| EdgeNeXt | `edgenext_xx_small.in1k` | `edgenext_small.usi_in1k` |
 
-Backbones are implemented in `models/backbones.py`. EdgeNeXt uses a 304-channel
-LSTM input and a small-branch 168→304 projection; other families retain 1280 input
-channels. All use a 256-channel LSTM output and the same SSD head architecture.
+Backbones are implemented in `models/backbones.py`. Both families use a 1280-channel
+LSTM input, a 256-channel LSTM output, and the same SSD head architecture.
 
 ## Setup
 
@@ -58,7 +56,6 @@ Train only (repeating a command resumes its default run):
 ```bash
 bash launchers/run_train_evaluate.sh mobilenetv2 train
 bash launchers/run_train_evaluate.sh efficientnet train
-bash launchers/run_train_evaluate.sh edgenext train
 ```
 
 Resume an existing run, including one created by an older launcher. Replace each
@@ -67,7 +64,6 @@ Resume an existing run, including one created by an older launcher. Replace each
 ```bash
 RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_train_evaluate.sh mobilenetv2 train
 RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_train_evaluate.sh efficientnet train
-RUN_NAME="EXISTING_EDGENEXT_RUN" bash launchers/run_train_evaluate.sh edgenext train
 ```
 
 Resume loads latest `classification.pt` and `detection.pt`, skips completed stages,
@@ -79,7 +75,6 @@ Evaluate the same existing runs using their best detection checkpoints:
 ```bash
 RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_train_evaluate.sh mobilenetv2 eval
 RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_train_evaluate.sh efficientnet eval
-RUN_NAME="EXISTING_EDGENEXT_RUN" bash launchers/run_train_evaluate.sh edgenext eval
 ```
 
 Omit `RUN_NAME` to evaluate a default run. Use `all` instead of `train` or `eval`
@@ -92,10 +87,10 @@ manifest; the run name is automatic:
 
 ```bash
 TRAIN_SUBSET=0.5 \
-  bash launchers/run_train_evaluate.sh edgenext all
+  bash launchers/run_train_evaluate.sh efficientnet all
 # Later, evaluate the same run without training:
 TRAIN_SUBSET=0.5 \
-  bash launchers/run_train_evaluate.sh edgenext eval
+  bash launchers/run_train_evaluate.sh efficientnet eval
 ```
 
 Explicit JSON manifest paths are also accepted through `TRAIN_SUBSET`. These
@@ -119,7 +114,6 @@ optimizer, update count and best score. Later invocations resume its latest chec
 | --- | --- |
 | `mobilenetv2` | `small_050`, `big_120d`, `joint_120d` |
 | `efficientnet` | `small_tinynet_d`, `big_efficientnet_b0`, `joint_efficientnet_b0_tinynet_d` |
-| `edgenext` | `small_edgenext_xx`, `big_edgenext_small`, `joint_edgenext` |
 
 | Stage | Epochs | Batch size | Initial LR | Schedule |
 | --- | ---: | ---: | ---: | --- |
@@ -179,13 +173,12 @@ conda activate vision
 RUNS="$(python path.py --get RUNS_DIR)"
 bash launchers/show_train_history.sh "$RUNS/shared_mobilenetv2_subset25_class5_linear_det100_cosine/seed_0"
 bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine/seed_0"
-bash launchers/show_train_history.sh "$RUNS/shared_edgenext_subset25_class5_linear_det100_cosine/seed_0"
 ```
 
 For just one model, append its experiment name from the family table above:
 
 ```bash
-bash launchers/show_train_history.sh "$RUNS/shared_edgenext_subset25_class5_linear_det100_cosine/seed_0/joint_edgenext"
+bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine/seed_0/joint_efficientnet_b0_tinynet_d"
 ```
 
 For an older or custom run, replace the run folder with its actual name. For a
@@ -196,6 +189,9 @@ updates, and skips models without checkpoints. It can run while training continu
 MobileNetV1 is no longer supported by the active code. Its checkpoints require
 the archived version; existing MobileNetV2 and EfficientNet checkpoint formats
 are preserved. Local archives, datasets, and checkpoint weights are not published.
+
+EdgeNeXt source and tests are archived locally in `archives/edgenext_20261116/`.
+Use that source snapshot to train, evaluate, or resume existing EdgeNeXt checkpoints.
 
 ## Attention-based Memory
 

@@ -13,8 +13,7 @@ class TimmMobileNetV2Backbone(nn.Module):
         if width_mult not in MODEL_NAMES or output_stride not in (16, 32):
             raise ValueError('Supported timm variants: .5/1.0/1.1d/1.2d; output strides: 32/16.')
         import timm
-        if model_name not in (None, 'tinynet_d.in1k', 'efficientnet_b0.ra_in1k',
-                              'edgenext_small.usi_in1k', 'edgenext_xx_small.in1k'):
+        if model_name not in (None, 'tinynet_d.in1k', 'efficientnet_b0.ra_in1k'):
             raise ValueError('Unsupported pretrained architecture.')
         if model_name is not None and width_mult != 1.0:
             raise ValueError('Named checkpoints cannot be width-scaled.')
@@ -25,11 +24,8 @@ class TimmMobileNetV2Backbone(nn.Module):
         self.data_config = timm.data.resolve_model_data_config(self.network)
         self._validate_data_config(self.data_config)
         self.network.reset_classifier(0)
-        if self.model_name.startswith("edgenext_"):
-            self.network.head = nn.Identity()  # Includes post-pooling classification LayerNorm.
         self.out_channels = self.network.num_features
-        expected = {'edgenext_small.usi_in1k': 304, 'edgenext_xx_small.in1k': 168}.get(self.model_name, 1280)
-        if self.out_channels != expected:
+        if self.out_channels != 1280:
             raise ValueError('Unexpected pretrained feature channel count.')
         self.stride_changes = []
         if output_stride == 16:
@@ -38,22 +34,15 @@ class TimmMobileNetV2Backbone(nn.Module):
         self.register_buffer('input_std', torch.tensor(self.data_config['std']).view(1, 3, 1, 1), persistent=False)
 
     def set_output_stride16(self):
-        if self.model_name.startswith('edgenext_'):
-            layer = self.network.stages[3].downsample[1]
-            if layer.kernel_size != (2, 2) or layer.stride != (2, 2):
-                raise ValueError('Unexpected EdgeNeXt downsampling architecture.')
-            layer.stride, layer.padding = (1, 1), 'same'
-            self.stride_changes = ['stages.3.downsample.1: stride 2 -> 1; padding same']
-        else:
-            layer = self.network.blocks[5][0].conv_dw
-            if layer.stride != (2, 2) or layer.dilation != (1, 1):
-                raise ValueError('Unexpected timm downsampling architecture.')
-            layer.stride = (1, 1)
-            self.stride_changes = ['blocks.5.0.conv_dw: stride 2 -> 1; dilation unchanged']
+        layer = self.network.blocks[5][0].conv_dw
+        if layer.stride != (2, 2) or layer.dilation != (1, 1):
+            raise ValueError('Unexpected timm downsampling architecture.')
+        layer.stride = (1, 1)
+        self.stride_changes = ['blocks.5.0.conv_dw: stride 2 -> 1; dilation unchanged']
         self.output_stride = 16
 
     def _validate_data_config(self, config):
-        size = 256 if self.model_name.startswith('edgenext_') else (152 if self.model_name == 'tinynet_d.in1k' else 224)
+        size = 152 if self.model_name == 'tinynet_d.in1k' else 224
         if (tuple(config['mean']) != (.485, .456, .406) or
                 tuple(config['std']) != (.229, .224, .225) or
                 config['interpolation'] != 'bicubic' or tuple(config['input_size']) != (3, size, size)):
@@ -77,8 +66,6 @@ class TimmMobileNetV2Backbone(nn.Module):
         if config != self.data_config:
             raise ValueError('Loaded checkpoint preprocessing configuration changed.')
         source.reset_classifier(0)
-        if self.model_name.startswith("edgenext_"):
-            source.head = nn.Identity()
         weights = source.state_dict()
         self.network.load_state_dict(weights, strict=True)
         if any(not torch.equal(value, self.network.state_dict()[key]) for key, value in weights.items()):
@@ -91,9 +78,6 @@ class TimmMobileNetV2Backbone(nn.Module):
 
 
 def build_backbone(config):
-    if config.backbone.startswith('edgenext_'):
-        name = 'edgenext_small.usi_in1k' if config.backbone == 'edgenext_small' else 'edgenext_xx_small.in1k'
-        return TimmMobileNetV2Backbone(model_name=name)
     if config.backbone in ('tinynet_d', 'efficientnet_b0'):
         name = 'tinynet_d.in1k' if config.backbone == 'tinynet_d' else 'efficientnet_b0.ra_in1k'
         return TimmMobileNetV2Backbone(model_name=name)

@@ -31,15 +31,14 @@ from utils.runtime import load_checkpoint, atomic_save_checkpoint
 EXPERIMENTS = {'small_050': .5, 'big_100': 1., 'big_110d': 1.1, 'big_120d': 1.2,
                'joint_100': 1., 'joint_110d': 1.1, 'joint_120d': 1.2,
                'small_tinynet_d': 1., 'big_efficientnet_b0': 1.,
-               'joint_efficientnet_b0_tinynet_d': 1.,
-               'small_edgenext_xx': 1., 'big_edgenext_small': 1., 'joint_edgenext': 1.}
+               'joint_efficientnet_b0_tinynet_d': 1.}
 
 
 class MatchedDetector(PairedVOD):
     def __init__(self, experiment, seed=0):
-        family = ('edgenext_xx_small' if experiment == 'small_edgenext_xx' else
-                  'edgenext_small' if 'edgenext' in experiment else
-                  'tinynet_d' if experiment == 'small_tinynet_d' else
+        if experiment not in EXPERIMENTS:
+            raise ValueError(f'Unknown or archived experiment: {experiment}')
+        family = ('tinynet_d' if experiment == 'small_tinynet_d' else
                   'efficientnet_b0' if 'efficientnet_b0' in experiment else 'timm_mobilenet_v2')
         cfg = make_joint_config(family, EXPERIMENTS[experiment])
         paired = PairedConfig(fast_width_mult=.5 if family == 'timm_mobilenet_v2' else 1.)
@@ -54,8 +53,6 @@ class MatchedDetector(PairedVOD):
             self.small_projection = nn.Identity()
             if self.standalone == 'small':
                 self.big.backbone.set_output_stride16()
-                if family == 'edgenext_xx_small':
-                    self.small_projection = nn.Conv2d(168, 304, 1, bias=False)
         # Separate initialization stream: changing backbone depth cannot change shared weights.
         with torch.random.fork_rng(devices=[]):
             torch.random.default_generator.manual_seed(seed)

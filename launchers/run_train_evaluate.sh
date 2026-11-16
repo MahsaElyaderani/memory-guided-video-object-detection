@@ -2,7 +2,7 @@
 set -eo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "Usage: bash launchers/run_train_evaluate.sh {mobilenetv2|efficientnet|edgenext} [all|train|eval]" >&2
+  echo "Usage: bash launchers/run_train_evaluate.sh {mobilenetv2|efficientnet} [all|train|eval]" >&2
   exit 2
 fi
 FAMILY="$1"
@@ -14,7 +14,6 @@ esac
 case "$FAMILY" in
   mobilenetv2) EXPERIMENTS="small_050 big_120d joint_120d" ;;
   efficientnet) EXPERIMENTS="small_tinynet_d big_efficientnet_b0 joint_efficientnet_b0_tinynet_d" ;;
-  edgenext) EXPERIMENTS="small_edgenext_xx big_edgenext_small joint_edgenext" ;;
   *) echo "Unknown family: $FAMILY" >&2; exit 2 ;;
 esac
 
@@ -22,7 +21,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate vision
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-# Matched settings for all three backbone families.
+# Matched settings for both backbone families.
 CLASS_EPOCHS=5
 DET_EPOCHS=100
 CLASS_BATCH=8

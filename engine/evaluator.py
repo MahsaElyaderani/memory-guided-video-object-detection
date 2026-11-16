@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import time
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, List, Sequence
 
 import torch
 from torch import Tensor

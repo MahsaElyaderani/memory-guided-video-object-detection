@@ -11,7 +11,7 @@ import torch
 from engine.evaluator import compute_map50, postprocess_detections
 from models.paired_vod import corrupt_memory
 from datasets.paired_frames import PairedFrames
-from paired_config import PolicyConfig, MemoryCorruption, probability
+from paired_config import MemoryCorruption, probability
 from utils.compute import profile_conv_linear, synchronize
 from routing.data import data_signature
 from utils.evaluation_data import load_frame, normalized_target, raw_detection_row

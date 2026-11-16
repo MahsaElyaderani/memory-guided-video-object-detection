@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-import torch.nn.functional as F
 from paired_config import PairedConfig, MemoryCorruption
 from .lstm_ssd import LSTMSSD
 from datasets.paired_frames import PairedFrames, big_frames
@@ -107,14 +106,9 @@ class PairedVOD(nn.Module):
 
     def fast_features(self, frames):
         self.big._validate_frame(big_frames(frames))
-        if self.model_cfg.uses_timm:
-            if not isinstance(frames, PairedFrames):
-                raise ValueError("timm small inference requires PairedFrames resized independently from the source RGB frame.")
-            resized = frames.small
-        else:
-            resized = F.interpolate(frames, size=(self.paired_config.fast_image_size,) * 2,
-                                    mode="bilinear", align_corners=False)
-        return self.small_projection(self.fast_backbone(resized))
+        if not isinstance(frames, PairedFrames):
+            raise ValueError("timm small inference requires PairedFrames resized independently from the source RGB frame.")
+        return self.small_projection(self.fast_backbone(frames.small))
 
     def forward_big(self, frames, state=None):
         return self.big.forward_step(big_frames(frames), state, return_anchors=True)

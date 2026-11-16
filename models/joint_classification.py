@@ -1,7 +1,6 @@
 """Multi-label classification with standalone backbones or a shared recurrent model."""
 import torch
 from torch import nn
-import torch.nn.functional as F
 from datasets.paired_frames import PairedFrames, big_frames
 from models.lstm_ssd import LSTMSSD
 from models.paired_vod import PairedVOD, select_memory
@@ -52,16 +51,12 @@ class JointClassifier(nn.Module):
             use_big, _ = random_training_schedule(len(frames), steps, frames.device)
         if use_big.dtype != torch.bool or use_big.shape != (len(frames), steps):
             raise ValueError('Branch choices must be boolean [batch, steps].')
-        if self.model_cfg.uses_timm:
-            if not isinstance(frames, PairedFrames):
-                raise ValueError('V2 classification requires independently resized PairedFrames.')
-            small = frames.small
-        else:
-            small = F.interpolate(big_frames(frames), (160, 160), mode='bilinear', align_corners=False)
+        if not isinstance(frames, PairedFrames):
+            raise ValueError('V2 classification requires independently resized PairedFrames.')
+        small = frames.small
         state = self.lstm.init_state(len(frames), 10, 10, frames.device, frames.dtype)
         logits = []
-        reuse_features = (self.model_cfg.uses_timm
-                          and self.paired_config.freeze_bn_stats)
+        reuse_features = self.paired_config.freeze_bn_stats
         for step in range(steps):
             # Each step sees the same image. Reuse the features with their gradients attached
             # so losses at all recurrent steps can update the backbone.

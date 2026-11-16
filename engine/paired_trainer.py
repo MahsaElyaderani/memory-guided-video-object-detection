@@ -13,7 +13,7 @@ from datasets.dataloader import build_dataloader
 from datasets.transforms import TrainTransform
 from engine.paired_evaluator import EvaluationOptions, evaluate_paired, select_paired_frames
 from losses.multibox_loss import MultiBoxLoss
-from models.paired_vod import corrupt_memory
+from models.joint_lstm_detector import corrupt_memory
 from paired_config import MemoryCorruption, PairedConfig, PolicyConfig
 from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
 from routing.paired_policy import random_training_schedule, validate_random_training_resume

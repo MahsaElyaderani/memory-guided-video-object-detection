@@ -9,8 +9,8 @@ import tempfile
 import torch
 
 from config import ModelConfig, SSDConfig, model_config_dict, checkpoint_model_config
-from models.lstm_ssd import LSTMSSD
-from models.paired_vod import PairedVOD
+from models.lstm_ssd_detector import LSTMSSD
+from models.joint_lstm_detector import PairedVOD
 from paired_config import PairedConfig
 from routing.predictions import sha256_file
 from utils.checkpoints import model_from_checkpoint

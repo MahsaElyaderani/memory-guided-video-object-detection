@@ -12,7 +12,7 @@ from path import parse_paths
 from engine.evaluator import classification_metrics
 from config import model_config_dict, SSDConfig
 from paired_config import PairedConfig
-from models.joint_classification import JointClassifier
+from models.classification_pretraining import JointClassifier
 from datasets.classification import VIDClassificationDataset, classification_collate
 from routing.data import add_data_arguments, selected_dataset, data_signature, guard_held_out, validate_native_categories
 from utils.joint_initialization import make_joint_config, initialize_backbones, classifier_from_payload, CLASSIFICATION_FORMAT

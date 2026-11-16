@@ -15,7 +15,7 @@ import torch
 from config import ModelConfig, SSDConfig, TrainConfig
 from datasets.imagenet_vid import ImageNetVIDDataset
 from datasets.transforms import EvalTransform
-from models.lstm_ssd import LSTMSSD
+from models.lstm_ssd_detector import LSTMSSD
 from engine.evaluator import evaluate_vid
 from utils.compute import count_parameters, compute_macs_per_frame
 from losses.multibox_loss import MultiBoxLoss

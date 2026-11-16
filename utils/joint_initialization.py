@@ -1,7 +1,7 @@
 """Fresh joint models and strict classification-to-detection transfer."""
 from config import ModelConfig, checkpoint_model_config
 from paired_config import PairedConfig
-from models.joint_classification import JointClassifier
+from models.classification_pretraining import JointClassifier
 from utils.runtime import load_checkpoint
 
 CLASSIFICATION_FORMAT = 1

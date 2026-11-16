@@ -1,4 +1,4 @@
-from .lstm_ssd import LSTMSSD
+from .lstm_ssd_detector import LSTMSSD
 from .backbones import build_backbone
 from .ssd_head import SSDFeatureMaps, SSDBoxPredictor
 from .anchors import SSDAnchorGenerator

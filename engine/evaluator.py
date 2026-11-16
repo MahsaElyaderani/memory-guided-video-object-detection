@@ -15,10 +15,10 @@ except ImportError:
 
 try:
     from models.anchors import BoxCoderScales, decode_boxes
-    from models.lstm_ssd import LSTMSSD
+    from models.lstm_ssd_detector import LSTMSSD
 except ImportError:
     from ..models.anchors import BoxCoderScales, decode_boxes
-    from ..models.lstm_ssd import LSTMSSD
+    from ..models.lstm_ssd_detector import LSTMSSD
 
 
 def _box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:

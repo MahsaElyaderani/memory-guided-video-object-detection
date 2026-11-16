@@ -9,7 +9,7 @@ import time
 import torch
 
 from engine.evaluator import compute_map50, postprocess_detections
-from models.paired_vod import corrupt_memory
+from models.joint_lstm_detector import corrupt_memory
 from datasets.paired_frames import PairedFrames
 from paired_config import MemoryCorruption, probability
 from utils.compute import profile_conv_linear, synchronize

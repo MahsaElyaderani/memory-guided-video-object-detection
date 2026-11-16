@@ -59,16 +59,16 @@ its three recurrent steps and transfers both backbones and the shared LSTM.
 Train only (repeating a command resumes its default run):
 
 ```bash
-bash launchers/run_train_evaluate.sh mobilenetv2 train
-bash launchers/run_train_evaluate.sh efficientnet train
+bash launchers/run_lstm_experiments.sh mobilenetv2 train
+bash launchers/run_lstm_experiments.sh efficientnet train
 ```
 
 Resume an existing run, including one created by an older launcher. Replace each
 `EXISTING_..._RUN` with its folder name directly under `RUNS_DIR`, without `/seed_0`:
 
 ```bash
-RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_train_evaluate.sh mobilenetv2 train
-RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_train_evaluate.sh efficientnet train
+RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_lstm_experiments.sh mobilenetv2 train
+RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_lstm_experiments.sh efficientnet train
 ```
 
 Resume loads latest `classification.pt` and `detection.pt`, skips completed stages,
@@ -78,8 +78,8 @@ worker count, and validation settings; incompatible resumes are rejected.
 Evaluate the same existing runs using their best detection checkpoints:
 
 ```bash
-RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_train_evaluate.sh mobilenetv2 eval
-RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_train_evaluate.sh efficientnet eval
+RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_lstm_experiments.sh mobilenetv2 eval
+RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_lstm_experiments.sh efficientnet eval
 ```
 
 Omit `RUN_NAME` to evaluate a default run. Use `all` instead of `train` or `eval`
@@ -92,10 +92,10 @@ manifest; the run name is automatic:
 
 ```bash
 TRAIN_SUBSET=0.5 \
-  bash launchers/run_train_evaluate.sh efficientnet all
+  bash launchers/run_lstm_experiments.sh efficientnet all
 # Later, evaluate the same run without training:
 TRAIN_SUBSET=0.5 \
-  bash launchers/run_train_evaluate.sh efficientnet eval
+  bash launchers/run_lstm_experiments.sh efficientnet eval
 ```
 
 Explicit JSON manifest paths are also accepted through `TRAIN_SUBSET`. These
@@ -155,13 +155,13 @@ equal probability. Only big calls commit the shared memory. Final evaluation loa
 For individual commands and options:
 
 ```bash
-python train_matched.py --help
+python train_lstm_models.py --help
 python -m evaluate.evaluate_paired_vod --help
 ```
 
 The earlier `standalone_pretrain` / `standalone_detection` trainer is archived locally
 under `archives/standalone_stages_20261116/` (source snapshot included).
-Use `train_matched.py` for current standalone and joint experiments.
+Use `train_lstm_models.py` for current standalone and joint experiments.
 Frozen-big training is archived under `archives/frozen_big_20261116/`.
 Its checkpoints remain evaluable; resuming that training mode requires the archived source.
 `prepare_joint_training.py` now prepares trainable joint runs by default.
@@ -232,7 +232,7 @@ to `splits/val100x20_seed7.json` and use its matching validation annotations.
 See the [Delta Distillation release](https://github.com/Qualcomm-AI-research/delta-distillation/releases/tag/v1.0)
 for the weights.
 
-**Initialization.** In `launchers/run_p4_student.sh`, set `BEST` to the trained
+**Initialization.** In `launchers/run_attention_experiments.sh`, set `BEST` to the trained
 joint EfficientNet/TinyNet-D detection checkpoint. On first use the launcher
 pins it with a hard link at `RUNS_DIR/p4_student/joint_init.pt` so both variants
 start from the same weights. The student inherits the TinyNet-D stem and blocks
@@ -241,8 +241,8 @@ fresh. The Python trainer also accepts a matched `small_tinynet_d` detection
 checkpoint via `--init-detector`.
 
 ```bash
-bash launchers/run_p4_student.sh train  # Start or resume both from their own detection.pt
-bash launchers/run_p4_student.sh eval   # Evaluate each detection_best.pt on CUDA
+bash launchers/run_attention_experiments.sh train  # Start or resume both from their own detection.pt
+bash launchers/run_attention_experiments.sh eval   # Evaluate each detection_best.pt on CUDA
 ```
 
 **Training and selection.** The trainer reads `MATCHED_TRAIN_SUBSET` (25% by
@@ -264,10 +264,23 @@ COCO AP50, epoch, and update for each variant with a saved checkpoint:
 bash launchers/show_train_history.sh "$(python path.py --get RUNS_DIR)/p4_student"
 ```
 
-**Reading the code.** Start with `models/p4_student.py` for fusion and
-`models/efficientdet_teacher.py` for P4 extraction. In `train_p4_student.py`,
+**Reading the code.** Start with `models/attention_memory_detector.py` for fusion and
+`models/frozen_efficientdet_teacher.py` for P4 extraction. In `train_attention_models.py`,
 `TrainingPairs` defines sampling and `evaluate` defines routing and scoring.
 The shared scorer and manifest reader live in `scripts/compare_vid.py`.
 
 Local results, runs, checkpoints and tests are excluded from Git. Supported
 launchers live in `launchers/`.
+
+### File naming and compatibility
+
+LSTM experiments start in `train_lstm_models.py` and `launchers/run_lstm_experiments.sh`.
+Attention-memory experiments (including their no-memory baseline) start in
+`train_attention_models.py` and `launchers/run_attention_experiments.sh`.
+Standalone classification pretraining remains backbone-only. Model implementations
+are in `models/joint_lstm_detector.py`, `models/lstm_ssd_detector.py`,
+`models/classification_pretraining.py`, `models/attention_memory_detector.py`, and
+`models/frozen_efficientdet_teacher.py`.
+
+The previous entry points, launchers, and model imports remain compatibility aliases.
+Run folders, experiment identifiers, checkpoint formats, and resume settings are unchanged.

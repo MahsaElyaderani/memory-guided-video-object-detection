@@ -18,7 +18,7 @@ from routing.data import add_data_arguments, selected_dataset, validate_native_c
 from utils.paired_checkpoints import paired_from_payload, write_json
 from utils.runtime import load_checkpoint
 from utils.checkpoints import model_from_checkpoint
-from models.paired_vod import PairedVOD
+from models.joint_lstm_detector import PairedVOD
 from routing.predictions import sha256_file
 from utils.compute import synchronize
 
@@ -63,7 +63,7 @@ def benchmark_backbones(model, steps, warmup):
 def load_evaluation_model(path, native_big=False):
     payload = load_checkpoint(path)
     if 'matched_format_version' in payload:
-        from train_matched import model_from_matched
+        from train_lstm_models import model_from_matched
         if native_big or payload.get('stage') != 'matched_detection':
             raise ValueError('Matched evaluation requires a matched detection checkpoint, without --native-big.')
         return model_from_matched(payload), payload

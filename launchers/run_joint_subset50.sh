@@ -21,7 +21,7 @@ else
   printf 'Continuing from best checkpoint: %s\n' "$BEST"
 fi
 
-python -u train_matched.py \
+python -u train_lstm_models.py \
   --experiment joint_120d --task detection \
   "${RESUME[@]}" \
   --video-ids "$SUBSET" --checkpoint-out "$OUT" \

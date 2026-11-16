@@ -24,6 +24,9 @@ venv/
 # Publish only the supported Bash launchers
 *.sh
 !/launchers/run_train_evaluate.sh
+!/launchers/run_lstm_experiments.sh
+!/launchers/run_attention_experiments.sh
+!/launchers/run_p4_student.sh
 !/launchers/run_joint_subset50.sh
 !/launchers/run_joint_interval_analysis.sh
 !/launchers/show_train_history.sh

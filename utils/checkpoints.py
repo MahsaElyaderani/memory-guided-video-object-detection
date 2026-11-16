@@ -5,11 +5,11 @@ import torch
 try:
     from config import ModelConfig, SSDConfig, checkpoint_model_config
     from models.ssd import MobileNetSSD
-    from models.lstm_ssd import LSTMSSD
+    from models.lstm_ssd_detector import LSTMSSD
 except ImportError:
     from ..config import ModelConfig, SSDConfig, checkpoint_model_config
     from ..models.ssd import MobileNetSSD
-    from ..models.lstm_ssd import LSTMSSD
+    from ..models.lstm_ssd_detector import LSTMSSD
 
 
 FORMAT_VERSION = 2

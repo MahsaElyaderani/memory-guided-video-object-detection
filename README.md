@@ -155,7 +155,9 @@ python train_matched.py --help
 python -m evaluate.evaluate_paired_vod --help
 ```
 
-Existing standalone detection stages remain available through `train.py`;
+The earlier `standalone_pretrain` / `standalone_detection` trainer is archived locally
+under `archives/standalone_stages_20261116/` (source snapshot included).
+Use `train_matched.py` for current standalone and joint experiments.
 `train_joint_pretrain.py` and `train_paired_vod.py` provide separate joint entry points.
 The shared launcher replaces the older family launchers.
 

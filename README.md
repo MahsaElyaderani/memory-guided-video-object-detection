@@ -1,291 +1,202 @@
 # Mobile VOD
 
-PyTorch video object detection inspired by *Looking Fast and Slow: Memory-Guided
-Mobile Video Object Detection*. The project combines pretrained image backbones,
-recurrent memory, and SSD detection heads for the 30 ImageNet VID classes.
-It supports timm MobileNetV2 and EfficientNet-B0/TinyNet-D, with standalone
-and joint models. Both families use a shared ConvLSTM and SSD detection heads in
-joint mode. Backbone weights are ImageNet-pretrained; SSD heads are trained here.
+Video object detection for the 30 ImageNet VID classes, with two memory approaches:
+**LSTM memory** shared between small/big backbones, and **attention memory** retrieved
+from a frozen teacher's last keyframe. Detection uses SSD feature pyramids and heads.
 
-| Model family | Small backbone (160×160) | Big backbone (320×320) |
+## Models
+
+| LSTM family | Small backbone, 160×160 | Big backbone, 320×320 | Experiment names: small / big / joint |
+| --- | --- | --- | --- |
+| MobileNetV2 | `mobilenetv2_050.lamb_in1k` | `mobilenetv2_120d.ra_in1k` | `small_050` / `big_120d` / `joint_120d` |
+| EfficientNet / TinyNet | `tinynet_d.in1k` | `efficientnet_b0.ra_in1k` | `small_tinynet_d` / `big_efficientnet_b0` / `joint_efficientnet_b0_tinynet_d` |
+
+**Standalone LSTM models:** classification pretraining uses one backbone, global
+average pooling, and a 30-class linear head. Detection transfers the backbone and
+trains it with a newly initialized LSTM and SSD heads.
+
+**Joint LSTM models:** classification pretraining uses both backbones, a shared
+LSTM, and a classification head, repeating each image for three recurrent steps.
+Detection transfers both backbones and the LSTM. Both backbones produce
+1280×10×10 features; the LSTM outputs 256 channels. Training randomly selects a
+backbone per sample/frame; only big-backbone calls commit joint memory. Standalone
+models update their own memory every frame. Detection trains on six-frame clips.
+
+**Attention models:** TinyNet-D through `blocks.4` produces 64×10×10 features at
+160×160. A frozen EfficientDet-D0 teacher processes 512×512 padded keyframes and
+caches its 64×32×32 P4 features. The student uses spatial attention to retrieve
+teacher features, adds them to its current features, then applies a 64→256
+projection and SSD heads. There is no LSTM.
+
+| Attention experiment | Student features before projection | Keyframe predictions |
 | --- | --- | --- |
-| MobileNetV2 | `mobilenetv2_050.lamb_in1k` | `mobilenetv2_120d.ra_in1k` |
-| EfficientNet / TinyNet | `tinynet_d.in1k` | `efficientnet_b0.ra_in1k` |
+| `--memory none` | Current features only: no-memory baseline | Frozen teacher |
+| `--memory p4` | Current features + retrieved P4 features | Frozen teacher |
 
-Backbones are implemented in `models/backbones.py`. Both families use a 1280-channel
-LSTM input, a 256-channel LSTM output, and the same SSD head architecture.
+These are student-training experiments; the teacher is not jointly optimized.
+Evaluation calls the teacher every 10 frames and the student on intervening frames.
 
 ## Setup
 
-Create a separate environment (the launcher expects a Conda environment named `vision`):
+Run commands from the project root. The launchers activate Conda environment
+`vision` and use CUDA. Python entry points also accept `--device cpu`.
 
 ```bash
-git clone https://github.com/MahsaElyaderani/mobile_vod.git
-cd mobile_vod
 conda create -n vision python=3.11 -y
 conda activate vision
 python -m pip install -r requirement/requirements.txt \
   -r requirement/requirements_paired.txt -r requirement/requirements_timm.txt
 ```
 
-The requirements pin PyTorch 2.6.0, TorchVision 0.21.0, and timm 1.0.22.
-The default launcher requires CUDA; check that `torch.cuda.is_available()` is true.
-
-Edit `path.py` for your machine, especially `DATASET_ROOT`. Training expects:
+Set paths in `path.py`, especially `DATASET_ROOT`. The dataset must provide:
 
 ```text
-ILSVRC2015/
-  Annotations/imagenet_vid_train.json
-  Annotations/imagenet_vid_val.json
-  Data/VID/...
+ILSVRC2015/Annotations/imagenet_vid_train.json
+ILSVRC2015/Annotations/imagenet_vid_val.json
+ILSVRC2015/Data/VID/...
 ```
 
-Annotations must be video-aware COCO-style JSON with `videos`, `images`,
-`annotations`, and `categories`; raw ImageNet XML files are not loaded directly.
-The included `splits/train_25pct.json` must match your training annotation file
-(the loader checks its hash). Dataset files and trained checkpoints are not included.
-Initial backbone training downloads pretrained weights through timm.
+The JSON annotations require `videos`, `images`, `annotations`, and `categories`.
+Training subset manifests must match the annotations' hash. Dataset files and
+trained checkpoints are not included; initial backbone weights download through timm.
 
-## Train and evaluate
+## LSTM training
 
-Run commands from the project root. Choose one family; each launcher processes
-small standalone, big standalone, then joint. It activates the `vision` environment.
-
-New standalone classification uses backbone → global average pooling → a 30-class
-linear head, with one prediction per image. Detection transfers the backbone and
-starts with freshly initialized LSTM and SSD weights. Joint classification keeps
-its three recurrent steps and transfers both backbones and the shared LSTM.
-
-Train only (repeating a command resumes its default run):
+Train/resume all three models in a family, then evaluate their best detectors:
 
 ```bash
-bash launchers/run_lstm_experiments.sh mobilenetv2 train
-bash launchers/run_lstm_experiments.sh efficientnet train
+bash launchers/run_lstm_experiments.sh mobilenetv2 all
+bash launchers/run_lstm_experiments.sh efficientnet all
 ```
 
-Resume an existing run, including one created by an older launcher. Replace each
-`EXISTING_..._RUN` with its folder name directly under `RUNS_DIR`, without `/seed_0`:
+Use `train` or `eval` instead of `all` to run only that part. Defaults:
 
-```bash
-RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_lstm_experiments.sh mobilenetv2 train
-RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_lstm_experiments.sh efficientnet train
-```
-
-Resume loads latest `classification.pt` and `detection.pt`, skips completed stages,
-and trains missing experiments. Preserve the original subset, budget, batch sizes,
-worker count, and validation settings; incompatible resumes are rejected.
-
-Evaluate the same existing runs using their best detection checkpoints:
-
-```bash
-RUN_NAME="EXISTING_MOBILENET_RUN" bash launchers/run_lstm_experiments.sh mobilenetv2 eval
-RUN_NAME="EXISTING_EFFICIENTNET_RUN" bash launchers/run_lstm_experiments.sh efficientnet eval
-```
-
-Omit `RUN_NAME` to evaluate a default run. Use `all` instead of `train` or `eval`
-to train/resume and then evaluate; `all` is also the default when omitted.
-Evaluation-only mode requires all three best detection checkpoints and never
-runs training. Each evaluation creates a new results directory.
-
-The launcher defaults to `TRAIN_SUBSET=0.25`. Set `0.5` for the fixed 50%
-manifest; the run name is automatic:
-
-```bash
-TRAIN_SUBSET=0.5 \
-  bash launchers/run_lstm_experiments.sh efficientnet all
-# Later, evaluate the same run without training:
-TRAIN_SUBSET=0.5 \
-  bash launchers/run_lstm_experiments.sh efficientnet eval
-```
-
-Explicit JSON manifest paths are also accepted through `TRAIN_SUBSET`. These
-fractions select the saved video subsets; they do not resample the dataset.
-
-Optional `MAX_VAL_VIDEOS`, `VAL_FRAMES_PER_VIDEO`, and `SUBSET_SEED` environment
-variables override 100, 20, and 7 for both training validation and final evaluation.
-Use the same values across families for comparisons. When evaluating later, supply
-any validation overrides again. Default run names include the family, subset filename,
-and epoch budgets; nondefault validation settings add a suffix. Existing default
-25% run names are preserved. Use `RUN_NAME` only to select an explicit folder or
-start an independent repeat. Different manifests with the same filename need
-separate `RUN_NAME` values; the trainer still rejects incompatible resumes. To evaluate
-an existing run with different validation coverage, set `RUN_NAME` to that run explicitly. Continuing an existing
-25% checkpoint on 50% with its optimizer/schedule is the separate
-`launchers/run_joint_subset50.sh` workflow for joint MobileNetV2. It starts from the
-best validated detector with cosine updates remaining. The new run inherits the
-optimizer, update count and best score. Later invocations resume its latest checkpoint.
-
-| Family | Small / big / joint experiments |
-| --- | --- |
-| `mobilenetv2` | `small_050`, `big_120d`, `joint_120d` |
-| `efficientnet` | `small_tinynet_d`, `big_efficientnet_b0`, `joint_efficientnet_b0_tinynet_d` |
-
-| Stage | Epochs | Batch size | Initial LR | Schedule |
+| Stage | Epochs | Batch | Initial LR | Schedule |
 | --- | ---: | ---: | ---: | --- |
-| Classification | 5 | 8 images | 0.01 | Linear |
+| Multi-label classification | 5 | 8 images | 0.01 | Linear |
 | Detection | 100 | 4 clips | 0.001 | Cosine |
 
-This launcher selects `splits/train_25pct.json` by default, independently of
-`MATCHED_TRAIN_SUBSET` in `path.py`. Joint classification repeats each image for three
-recurrent steps; standalone classification uses one pass. Detection
-uses six-frame clips. Validation runs every 5,000 updates on up
-to 100 videos with 20 frames each (subset seed 7, training seed 0). Final evaluation
-uses the same validation selection, big-only mode for standalone models and
-interval 8 for joint models. Adjust batch sizes to GPU memory before starting.
+Both stages use RMSprop. The launcher selects the fixed 25% training subset and
+validates every 5,000 updates on 100 videos × up to 20 consecutive frames, seed 7.
+Set `TRAIN_SUBSET=0.5` for the fixed 50% subset, or supply a manifest path.
 
-New runs use separate family folders:
-`RUNS_DIR/shared_<family>_subset25_class5_linear_det100_cosine/seed_0/<experiment>/`
-for joint models on 25%, or the equivalent `subset50` folder for 50%.
-Standalone defaults append `_backbone_pretrain` to the run name, before `/seed_0/`.
-Explicit `RUN_NAME` uses that exact run folder for all models, including existing runs.
-Old standalone classification checkpoints resume their saved recurrent architecture.
-Previous experiment folders are not reused. Repeating the same command resumes
-latest `classification.pt` and `detection.pt`, including mid-epoch progress.
-Keep the saved training budget and settings unchanged when resuming.
-
-Fresh detection starts from `classification_best.pt`. Best checkpoints use
-highest classification micro AP (final recurrent step) or continuous detection
-mAP@0.5. Classification trains with multi-label BCE on the single standalone output
-or all three joint outputs. Joint
-detection training samples a backbone independently per example and frame with
-equal probability. Only big calls commit the shared memory. Final evaluation loads
-`detection_best.pt`. Evaluation JSON files go to a timestamped family folder under
-`RESULTS_DIR`. All paths are configured in `path.py`.
-
-For individual commands and options:
+To train **one standalone or joint model**, choose any experiment from the table:
 
 ```bash
-python train_lstm_models.py --help
-python -m evaluate.evaluate_paired_vod --help
-```
-
-The earlier `standalone_pretrain` / `standalone_detection` trainer is archived locally
-under `archives/standalone_stages_20261116/` (source snapshot included).
-Use `train_lstm_models.py` for current standalone and joint experiments.
-Frozen-big training is archived under `archives/frozen_big_20261116/`.
-Its checkpoints remain evaluable; resuming that training mode requires the archived source.
-`prepare_joint_training.py` now prepares trainable joint runs by default.
-The older `train_joint_pretrain.py` command is archived locally under
-`archives/joint_pretrain_20261116/`, with a source snapshot for legacy training resume.
-Current classification pretraining uses `train_lstm_models.py --task classification`
-and the shared loop in `engine/classification_training.py`.
-Legacy `joint_pretrain` checkpoints remain loadable for detector initialization.
-`train_paired_vod.py` remains a separate joint detection entry point.
-The shared launcher replaces the older family launchers.
-
-Show saved classification and detection history while training:
-
-```bash
-bash launchers/show_train_history.sh
-```
-
-Pass a run folder as the first argument to limit the report to that run.
-
-Show classification and detection history for each family's default 25% run:
-
-```bash
-conda activate vision
+EXP=joint_120d
 RUNS="$(python path.py --get RUNS_DIR)"
-bash launchers/show_train_history.sh "$RUNS/shared_mobilenetv2_subset25_class5_linear_det100_cosine/seed_0"
-bash launchers/show_train_history.sh "$RUNS/shared_mobilenetv2_subset25_class5_linear_det100_cosine_backbone_pretrain/seed_0"
-bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine/seed_0"
-bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine_backbone_pretrain/seed_0"
+DIR="$RUNS/my_experiment/$EXP"
+COMMON=(--experiment "$EXP" --video-ids splits/train_25pct.json
+        --num-workers 4 --max-val-videos 100 --val-frames-per-video 20
+        --subset-seed 7 --seed 0 --device cuda)
+
+python train_lstm_models.py "${COMMON[@]}" --task classification \
+  --epochs 5 --batch-size 8 --learning-rate 0.01 --lr-schedule linear \
+  --checkpoint-out "$DIR/classification.pt"
+python train_lstm_models.py "${COMMON[@]}" --task detection \
+  --epochs 100 --batch-size 4 --learning-rate 0.001 --lr-schedule cosine \
+  --init-checkpoint "$DIR/classification_best.pt" --checkpoint-out "$DIR/detection.pt"
 ```
 
-For just one model, append its experiment name from the family table above:
+For full-training-set runs, omit `--video-ids` and leave training selection limits
+unset in `path.py`. Use a fresh output folder when changing the dataset or budget.
+
+The launcher resumes latest `classification.pt` / `detection.pt` automatically.
+For individual commands, add `--resume` pointing to that stage's latest checkpoint.
+Keep the saved training settings unchanged. Best classification checkpoints maximize
+micro AP; best detection checkpoints maximize continuous mAP@0.5.
+
+Default launcher run names encode family, subset, and budgets; standalone run names
+append `_backbone_pretrain`. The launcher prints both locations. `RUN_NAME=your_run`
+selects an explicit folder under `RUNS_DIR` for all three models.
+
+## LSTM evaluation: subset or full validation set
+
+Set `CHECKPOINT` to a trained detector's `detection_best.pt`. Use `MODE=fixed` for
+joint models or `MODE=big` for **either** standalone model (its sole backbone).
 
 ```bash
-bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine/seed_0/joint_efficientnet_b0_tinynet_d"
+CHECKPOINT=/path/to/detection_best.pt
+MODE=fixed
+RESULTS="$(python path.py --get RESULTS_DIR)"
+
+# Fixed subset: 100 videos × up to 20 consecutive frames.
+python -m evaluate.evaluate_paired_vod \
+  --checkpoint "$CHECKPOINT" --mode "$MODE" --interval 8 \
+  --max-videos 100 --frames-per-video 20 --subset-seed 7 --seed 0 \
+  --score-threshold 0 --max-detections 100 --warmup-frames 10 \
+  --no-losses --no-visuals --device cuda --output-dir "$RESULTS/my_subset_eval"
+
+# Full validation set: all videos and frames, with the same inference settings.
+python -m evaluate.evaluate_paired_vod \
+  --checkpoint "$CHECKPOINT" --mode "$MODE" --interval 8 --seed 0 \
+  --score-threshold 0 --max-detections 100 --warmup-frames 10 \
+  --no-losses --no-visuals --device cuda --output-dir "$RESULTS/my_full_eval"
 ```
 
-For an older or custom run, replace the run folder with its actual name. For a
-default 50% run, replace `subset25` with `subset50`. The report reads the latest
-saved checkpoints, includes best validation scores, learning rates and remaining
-updates, and skips models without checkpoints. It can run while training continues.
+Use fresh output directories and leave evaluation `video_ids` unset in `path.py`
+for full evaluation. Results include continuous mAP@0.5, per-class AP, FPS, and
+operation counts. Compare FPS on the same hardware/device with identical settings.
 
-MobileNetV1 is no longer supported by the active code. Its checkpoints require
-the archived version; existing MobileNetV2 and EfficientNet checkpoint formats
-are preserved. Local archives, datasets, and checkpoint weights are not published.
+## Attention training and evaluation
 
-EdgeNeXt source and tests are archived locally in `archives/edgenext_20261116/`.
-Use that source snapshot to train, evaluate, or resume existing EdgeNeXt checkpoints.
+Configure `DELTA_ROOT`, `DELTA_TEACHER_CHECKPOINT`, `MATCHED_TRAIN_SUBSET`, and
+`P4_VALIDATION_MANIFEST` in `path.py`. Required local dependencies are the Delta
+fork's `baseline/evaluate_tracking.py`, `tracking.py`, and `lib/`; the released VID
+EfficientDet-D0 teacher checkpoint; and `scripts/compare_vid.py` for manifests and
+scoring. The local scripts are not bundled in Git. The environment also needs
+OmegaConf 2.3.0 and pycocotools.
 
-The matched `big_100`, `big_110d`, `joint_100`, and `joint_110d` experiments are archived
-in `archives/mobilenet_variants_20261116/`. Use that source snapshot for their training,
-evaluation, or resume. Low-level MobileNetV2 backbone support remains available.
-
-## Attention-based Memory
-
-This detection experiment asks whether the last keyframe helps TinyNet-D detect
-objects on intervening frames. Both variants use TinyNet-D through `blocks.4`
-on a 160×160 frame. The student feature map is 64×10×10. The frozen
-EfficientDet-D0 teacher processes a padded 512×512 keyframe and supplies its
-64×32×32 P4 map. Each variant uses one 64→256 projection before the SSD pyramid.
-
-| Trainer mode | Input to the projection | Prediction on keyframes |
-| --- | --- | --- |
-| `none` | Current student features | Teacher detections |
-| `p4` | Current features plus a spatially weighted sum of cached P4 values | Teacher detections |
-
-**Setup.** Set `DELTA_ROOT` to the Delta Distillation checkout containing the
-project-specific `baseline/evaluate_tracking.py`, its sibling `tracking.py`,
-and the fork's `lib/` directory. The adapter calls that baseline's `load_model`
-and `records` functions. Set `DELTA_TEACHER_CHECKPOINT` to the released VID
-`checkpoints/test/efficientdet_d0.pth`. The fork uses OmegaConf 2.3.0 and the
-scorer needs pycocotools in the active environment. Set `P4_VALIDATION_MANIFEST`
-to `splits/val100x20_seed7.json` and use its matching validation annotations.
-See the [Delta Distillation release](https://github.com/Qualcomm-AI-research/delta-distillation/releases/tag/v1.0)
-for the weights.
-
-**Initialization.** In `launchers/run_attention_experiments.sh`, set `BEST` to the trained
-joint EfficientNet/TinyNet-D detection checkpoint. On first use the launcher
-pins it with a hard link at `RUNS_DIR/p4_student/joint_init.pt` so both variants
-start from the same weights. The student inherits the TinyNet-D stem and blocks
-through `blocks.4`, the SSD pyramid and predictors. Its 64→256 projection starts
-fresh. The Python trainer also accepts a matched `small_tinynet_d` detection
-checkpoint via `--init-detector`.
+Export the fixed validation subset once if its manifest does not exist:
 
 ```bash
-bash launchers/run_attention_experiments.sh train  # Start or resume both from their own detection.pt
-bash launchers/run_attention_experiments.sh eval   # Evaluate each detection_best.pt on CUDA
+python scripts/compare_vid.py export --manifest splits/val100x20_seed7.json
 ```
 
-**Training and selection.** The trainer reads `MATCHED_TRAIN_SUBSET` (25% by
-default), divides videos into non-overlapping 10-frame windows, and samples one
-student frame 1–9 frames after each keyframe. Both images share a crop and flip,
-and the student frame supplies the detection targets. The default budget is
-100 epochs with batch size 4 and cosine decay from 0.001. Validation runs every
-5,000 optimizer updates and at the final update.
-
-At validation, the cache resets at each video's selected window. Frame 1 and
-every tenth frame after it use the teacher. **Best means highest COCO AP50 on
-student frames** because those are the frames where the variants differ.
-Evaluation also reports whole-sequence AP50 and continuous AP50. The trainer
-stores each variant's history in `RUNS_DIR/p4_student/{none,p4}/detection.pt`.
-Run the following command from the project root to compare the best student-frame
-COCO AP50, epoch, and update for each variant with a saved checkpoint:
+Set `P4_VALIDATION_MANIFEST` to that file. In the attention launcher, set `BEST` to
+your trained joint EfficientNet/TinyNet detection checkpoint. Both variants inherit
+its TinyNet-D features and SSD weights; their 64→256 projection is newly initialized.
+The launcher pins one source checkpoint so both variants start from the same weights.
 
 ```bash
-bash launchers/show_train_history.sh "$(python path.py --get RUNS_DIR)/p4_student"
+bash launchers/run_attention_experiments.sh train
+bash launchers/run_attention_experiments.sh eval
 ```
 
-**Reading the code.** Start with `models/attention_memory_detector.py` for fusion and
-`models/frozen_efficientdet_teacher.py` for P4 extraction. In `train_attention_models.py`,
-`TrainingPairs` defines sampling and `evaluate` defines routing and scoring.
-The shared scorer and manifest reader live in `scripts/compare_vid.py`.
+Defaults are 100 detection epochs, batch 4, RMSprop with cosine decay from 0.001,
+and validation every 5,000 updates. Training samples one student frame after each
+keyframe from non-overlapping 10-frame windows. The launcher resumes each variant's
+latest checkpoint under `RUNS_DIR/p4_student/{none,p4}` and evaluates its best one.
+Best selection uses **student-frame COCO AP50**; evaluation also prints whole-sequence
+COCO AP50 and continuous AP50.
 
-Local results, runs, checkpoints and tests are excluded from Git. Supported
-launchers live in `launchers/`.
+For one variant, use `python train_attention_models.py train --memory p4
+--init-detector /path/to/detection_best.pt --run-dir /path/to/new_run --device cuda`
+(or `--memory none`). To resume, replace `--init-detector` with
+`--checkpoint /path/to/new_run/detection.pt`. For evaluation, use action `eval`
+and `--checkpoint /path/to/new_run/detection_best.pt`.
 
-### File naming and compatibility
+**Current evaluation scope:** attention checkpoints require the exact saved
+validation manifest, including during evaluation. A checkpoint trained with the
+100-video manifest cannot currently be evaluated on a different full-validation
+manifest through this CLI. The manifest exporter also fixes the selection to
+100 videos × up to 20 frames; full-set attention evaluation needs a code change.
 
-LSTM experiments start in `train_lstm_models.py` and `launchers/run_lstm_experiments.sh`.
-Attention-memory experiments (including their no-memory baseline) start in
-`train_attention_models.py` and `launchers/run_attention_experiments.sh`.
-Standalone classification pretraining remains backbone-only. Model implementations
-are in `models/joint_lstm_detector.py`, `models/lstm_ssd_detector.py`,
-`models/classification_pretraining.py`, `models/attention_memory_detector.py`, and
-`models/frozen_efficientdet_teacher.py`.
+## Main modules and monitoring
 
-The previous entry points, launchers, and model imports remain compatibility aliases.
-Run folders, experiment identifiers, checkpoint formats, and resume settings are unchanged.
+| Purpose | Main files |
+| --- | --- |
+| LSTM training and classification | `train_lstm_models.py`, `engine/classification_training.py`, `models/classification_pretraining.py` |
+| LSTM detection | `models/joint_lstm_detector.py`, `models/lstm_ssd_detector.py`, `models/bottleneck_lstm.py`, `engine/paired_trainer.py` |
+| Attention experiments | `train_attention_models.py`, `models/attention_memory_detector.py`, `models/frozen_efficientdet_teacher.py` |
+| Shared backbones and heads | `models/backbones.py`, `models/ssd_head.py`, `models/anchors.py` |
+| Data and preprocessing | `datasets/imagenet_vid.py`, `datasets/classification.py`, `datasets/transforms.py`, `datasets/dataloader.py` |
+| Evaluation and checkpoints | `evaluate/evaluate_paired_vod.py`, `engine/paired_evaluator.py`, `utils/lstm_checkpoints.py`, `utils/runtime.py` |
+
+```bash
+bash launchers/show_train_history.sh                    # All discovered runs
+bash launchers/show_train_history.sh /path/to/run       # One run
+```
+
+History reports saved training/validation metrics, best scores, learning rates,
+and remaining updates. It can be read while training continues.

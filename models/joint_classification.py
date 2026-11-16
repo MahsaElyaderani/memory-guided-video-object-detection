@@ -1,4 +1,4 @@
-"""Image classification through the same two backbones and shared detector LSTM."""
+"""Multi-label classification with standalone backbones or a shared recurrent model."""
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -9,21 +9,25 @@ from routing.paired_policy import random_training_schedule
 
 
 class JointClassifier(nn.Module):
-    def __init__(self, model_config, paired_config, num_classes, *, detector=None):
+    def __init__(self, model_config, paired_config, num_classes, *, detector=None, backbone_only=False):
         super().__init__()
         if num_classes < 2:
             raise ValueError('Classification requires at least two classes.')
         # Reuse the exact detector topology, but retain no detection heads or anchors.
         pair = detector if detector is not None else PairedVOD(LSTMSSD(model_config), paired_config)
         self.standalone = getattr(pair, 'standalone', None)
+        if backbone_only and not self.standalone:
+            raise ValueError('Backbone-only classification requires a standalone model.')
+        self.backbone_only = backbone_only
         self.model_cfg, self.paired_config = model_config, paired_config
         self.ssd_cfg = pair.ssd_cfg
         self.big_backbone = pair.big.backbone
         self.small_backbone = pair.fast_backbone
         self.small_projection = pair.small_projection
-        self.lstm = pair.big.lstm
+        self.lstm = None if backbone_only else pair.big.lstm
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = nn.Linear(model_config.lstm_channels, num_classes)
+        self.classifier = nn.Linear(model_config.mobilenet_output_channels if backbone_only
+                                    else model_config.lstm_channels, num_classes)
         self.num_classes = num_classes
 
     def train(self, mode=True):
@@ -37,6 +41,13 @@ class JointClassifier(nn.Module):
     def forward(self, frames, steps=3, use_big=None):
         if steps < 1 or frames.ndim != 4 or big_frames(frames).shape[1:] != (3, 320, 320):
             raise ValueError('Expected a batch of 320 RGB views and positive unroll length.')
+        if self.backbone_only:
+            if not isinstance(frames, PairedFrames):
+                raise ValueError('Standalone classification requires independently resized PairedFrames.')
+            view = frames.small if self.standalone == 'small' else big_frames(frames)
+            features = self.big_backbone(view)
+            # One prediction per image keeps the existing BCE/metric loop unchanged.
+            return self.classifier(self.pool(features).flatten(1))[:, None, :]
         if use_big is None:
             use_big, _ = random_training_schedule(len(frames), steps, frames.device)
         if use_big.dtype != torch.bool or use_big.shape != (len(frames), steps):
@@ -75,6 +86,9 @@ class JointClassifier(nn.Module):
                 self.paired_config.fast_image_size != detector.paired_config.fast_image_size or
                 self.paired_config.min_depth != detector.paired_config.min_depth):
             raise ValueError('Classification and detection architectures differ.')
+        if self.backbone_only:
+            detector.big.backbone.load_state_dict(self.big_backbone.state_dict(), strict=True)
+            return
         for target, source in ((detector.big.backbone, self.big_backbone),
                                (detector.fast_backbone, self.small_backbone),
                                (detector.small_projection, self.small_projection),

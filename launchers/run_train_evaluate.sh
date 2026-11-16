@@ -47,15 +47,17 @@ DEFAULT_RUN="shared_${FAMILY}_${SUBSET_TAG}_class${CLASS_EPOCHS}_linear_det${DET
 if [[ "$MAX_VAL_VIDEOS/$VAL_FRAMES_PER_VIDEO/$SUBSET_SEED" != "100/20/7" ]]; then
   DEFAULT_RUN="${DEFAULT_RUN}_val${MAX_VAL_VIDEOS}x${VAL_FRAMES_PER_VIDEO}_seed${SUBSET_SEED}"
 fi
+STANDALONE_ROOT="$RUNS/${RUN_NAME:-${DEFAULT_RUN}_backbone_pretrain}/seed_0"
 RUN_NAME="${RUN_NAME:-$DEFAULT_RUN}"
 ROOT="$RUNS/$RUN_NAME/seed_0"
 
 # Re-running resumes only this shared-launcher family folder.
-printf '\nCheckpoint folder: %s\n' "$ROOT"
+printf '\nJoint checkpoint folder: %s\nStandalone checkpoint folder: %s\n' "$ROOT" "$STANDALONE_ROOT"
 if [[ "$ACTION" != eval ]]; then
 [[ -f "$TRAIN_SUBSET" ]] || { printf 'Missing training subset: %s\n' "$TRAIN_SUBSET" >&2; exit 1; }
 for EXP in $EXPERIMENTS; do
   DIR="$ROOT/$EXP"
+  [[ "$EXP" == joint_* ]] || DIR="$STANDALONE_ROOT/$EXP"
   CLASS_RESUME=()
   DET_RESUME=()
   if [[ -f "$DIR/classification.pt" ]]; then CLASS_RESUME=(--resume "$DIR/classification.pt"); fi
@@ -87,18 +89,22 @@ fi
 
 if [[ "$ACTION" != train ]]; then
 for EXP in $EXPERIMENTS; do
-  [[ -f "$ROOT/$EXP/detection_best.pt" ]] || {
-    echo "Missing best detection checkpoint: $ROOT/$EXP/detection_best.pt" >&2; exit 1;
+  DIR="$ROOT/$EXP"
+  [[ "$EXP" == joint_* ]] || DIR="$STANDALONE_ROOT/$EXP"
+  [[ -f "$DIR/detection_best.pt" ]] || {
+    echo "Missing best detection checkpoint: $DIR/detection_best.pt" >&2; exit 1;
   }
 done
 mkdir -p "$RESULTS"
 OUT="$(mktemp -d "$RESULTS/${RUN_NAME}_seed0_XXXXXX")"
 for EXP in $EXPERIMENTS; do
+  DIR="$ROOT/$EXP"
+  [[ "$EXP" == joint_* ]] || DIR="$STANDALONE_ROOT/$EXP"
   MODE=big
   case "$EXP" in joint_*) MODE=fixed ;; esac
   printf '\nEvaluating %s\n' "$EXP"
   python -u -m evaluate.evaluate_paired_vod \
-    --checkpoint "$ROOT/$EXP/detection_best.pt" \
+    --checkpoint "$DIR/detection_best.pt" \
     --mode "$MODE" --interval 8 \
     --max-videos "$MAX_VAL_VIDEOS" --frames-per-video "$VAL_FRAMES_PER_VIDEO" \
     --subset-seed "$SUBSET_SEED" --seed 0 \

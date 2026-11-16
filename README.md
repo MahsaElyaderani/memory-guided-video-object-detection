@@ -51,6 +51,11 @@ Initial backbone training downloads pretrained weights through timm.
 Run commands from the project root. Choose one family; each launcher processes
 small standalone, big standalone, then joint. It activates the `vision` environment.
 
+New standalone classification uses backbone → global average pooling → a 30-class
+linear head, with one prediction per image. Detection transfers the backbone and
+starts with freshly initialized LSTM and SSD weights. Joint classification keeps
+its three recurrent steps and transfers both backbones and the shared LSTM.
+
 Train only (repeating a command resumes its default run):
 
 ```bash
@@ -121,22 +126,27 @@ optimizer, update count and best score. Later invocations resume its latest chec
 | Detection | 100 | 4 clips | 0.001 | Cosine |
 
 This launcher selects `splits/train_25pct.json` by default, independently of
-`MATCHED_TRAIN_SUBSET` in `path.py`. Classification repeats each image for three recurrent
-steps; detection uses six-frame clips. Validation runs every 5,000 updates on up
+`MATCHED_TRAIN_SUBSET` in `path.py`. Joint classification repeats each image for three
+recurrent steps; standalone classification uses one pass. Detection
+uses six-frame clips. Validation runs every 5,000 updates on up
 to 100 videos with 20 frames each (subset seed 7, training seed 0). Final evaluation
 uses the same validation selection, big-only mode for standalone models and
 interval 8 for joint models. Adjust batch sizes to GPU memory before starting.
 
 New runs use separate family folders:
 `RUNS_DIR/shared_<family>_subset25_class5_linear_det100_cosine/seed_0/<experiment>/`
-for 25%, or the equivalent `subset50` folder for 50%.
+for joint models on 25%, or the equivalent `subset50` folder for 50%.
+Standalone defaults append `_backbone_pretrain` to the run name, before `/seed_0/`.
+Explicit `RUN_NAME` uses that exact run folder for all models, including existing runs.
+Old standalone classification checkpoints resume their saved recurrent architecture.
 Previous experiment folders are not reused. Repeating the same command resumes
 latest `classification.pt` and `detection.pt`, including mid-epoch progress.
 Keep the saved training budget and settings unchanged when resuming.
 
 Fresh detection starts from `classification_best.pt`. Best checkpoints use
 highest classification micro AP (final recurrent step) or continuous detection
-mAP@0.5. Classification trains with multi-label BCE at all three steps. Joint
+mAP@0.5. Classification trains with multi-label BCE on the single standalone output
+or all three joint outputs. Joint
 detection training samples a backbone independently per example and frame with
 equal probability. Only big calls commit the shared memory. Final evaluation loads
 `detection_best.pt`. Evaluation JSON files go to a timestamped family folder under
@@ -172,7 +182,9 @@ Show classification and detection history for each family's default 25% run:
 conda activate vision
 RUNS="$(python path.py --get RUNS_DIR)"
 bash launchers/show_train_history.sh "$RUNS/shared_mobilenetv2_subset25_class5_linear_det100_cosine/seed_0"
+bash launchers/show_train_history.sh "$RUNS/shared_mobilenetv2_subset25_class5_linear_det100_cosine_backbone_pretrain/seed_0"
 bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine/seed_0"
+bash launchers/show_train_history.sh "$RUNS/shared_efficientnet_subset25_class5_linear_det100_cosine_backbone_pretrain/seed_0"
 ```
 
 For just one model, append its experiment name from the family table above:

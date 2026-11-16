@@ -76,7 +76,7 @@ class MatchedDetector(PairedVOD):
         return super().forward_selected(frames, state, use_big, small_commit)
 
 
-def build_model(experiment, task, seed):
+def build_model(experiment, task, seed, *, standalone_backbone_only=True):
     detector = MatchedDetector(experiment, seed)
     if task == 'detection':
         return detector
@@ -84,7 +84,8 @@ def build_model(experiment, task, seed):
         raise ValueError('Unknown matched task.')
     with torch.random.fork_rng(devices=[]):
         torch.random.default_generator.manual_seed(seed + 1)
-        return JointClassifier(detector.model_cfg, detector.paired_config, 30, detector=detector)
+        return JointClassifier(detector.model_cfg, detector.paired_config, 30, detector=detector,
+                               backbone_only=bool(detector.standalone) and standalone_backbone_only)
 
 
 def model_from_matched(payload):
@@ -93,7 +94,12 @@ def model_from_matched(payload):
     if payload.get('class_to_idx') != {str(i): i - 1 for i in range(1, 31)}:
         raise ValueError('Matched class mapping differs.')
     task = payload['stage'].removeprefix('matched_')
-    model = build_model(payload['experiment'], task, payload['initialization_seed'])
+    architecture = payload.get('classification_architecture', 'recurrent')
+    if architecture not in ('recurrent', 'backbone_only') or (
+            architecture == 'backbone_only' and (task != 'classification' or payload['experiment'].startswith('joint_'))):
+        raise ValueError('Incompatible classification architecture metadata.')
+    model = build_model(payload['experiment'], task, payload['initialization_seed'],
+                        standalone_backbone_only=architecture == 'backbone_only')
     expected = paired_metadata(model)
     if any(payload.get(key) != value for key, value in expected.items()):
         raise ValueError('Matched architecture/configuration differs.')
@@ -112,7 +118,8 @@ def parse_args(argv=None):
     parser.add_argument('--experiment', choices=tuple(EXPERIMENTS), required=True)
     parser.add_argument('--lr-schedule', choices=('constant', 'linear', 'cosine'), default='constant')
     parser.add_argument('--validate-every', type=int, default=5000, help='Budgeted validation interval in optimizer updates.')
-    parser.add_argument('--steps', type=int, default=3)
+    parser.add_argument('--steps', type=int, default=3,
+                        help='Recurrent classification steps; backbone-only standalone models use one pass.')
     parser.add_argument('--init-checkpoint')
     parser.add_argument('--expand-subset', action='store_true',
                         help='Continue joint cosine detection on a larger subset in a fresh output directory.')
@@ -380,6 +387,8 @@ def train(args):
                    'epoch': epoch, 'run_id': run_id, 'history': history, 'sources': sources,
                    'training_signatures': signatures, 'run_definition': definition,
                    'resume_arguments': saved_arguments(args)}
+        if args.task == 'classification' and model.backbone_only:
+            payload['classification_architecture'] = 'backbone_only'
         if budget:
             payload.update(budget=budget, scheduler=scheduler, global_step=budget['updates'])
         save_matched_checkpoints(payload, destination, select_best=validate)

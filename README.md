@@ -60,16 +60,28 @@ The JSON annotations require `videos`, `images`, `annotations`, and `categories`
 Training subset manifests must match the annotations' hash. Dataset files and
 trained checkpoints are not included; initial backbone weights download through timm.
 
-## LSTM training
+## Primary workflow: launchers
 
-Train/resume all three models in a family, then evaluate their best detectors:
+### LSTM models
+
+Train or resume classification and detection for all three models in a family:
 
 ```bash
-bash launchers/run_lstm_experiments.sh mobilenetv2 all
-bash launchers/run_lstm_experiments.sh efficientnet all
+bash launchers/run_lstm_experiments.sh mobilenetv2 train
+bash launchers/run_lstm_experiments.sh efficientnet train
 ```
 
-Use `train` or `eval` instead of `all` to run only that part. Defaults:
+Evaluate their best detection checkpoints without starting training:
+
+```bash
+bash launchers/run_lstm_experiments.sh mobilenetv2 eval
+bash launchers/run_lstm_experiments.sh efficientnet eval
+```
+
+Evaluation requires all three best checkpoints. It uses 100 videos × up to 20
+consecutive frames, seed 7; joint models use interval 8 and standalone models use
+their sole backbone. Each invocation creates a new results directory. Use `all`
+instead of `train` or `eval` to train/resume and then evaluate. Training defaults:
 
 | Stage | Epochs | Batch | Initial LR | Schedule |
 | --- | ---: | ---: | ---: | --- |
@@ -79,6 +91,69 @@ Use `train` or `eval` instead of `all` to run only that part. Defaults:
 Both stages use RMSprop. The launcher selects the fixed 25% training subset and
 validates every 5,000 updates on 100 videos × up to 20 consecutive frames, seed 7.
 Set `TRAIN_SUBSET=0.5` for the fixed 50% subset, or supply a manifest path.
+Repeat the same `TRAIN_SUBSET` and any `RUN_NAME` overrides when evaluating.
+`MAX_VAL_VIDEOS`, `VAL_FRAMES_PER_VIDEO`, and `SUBSET_SEED` control validation
+selection; keep them identical for comparable runs.
+
+The launcher resumes latest `classification.pt` / `detection.pt` automatically.
+Keep the saved training settings unchanged. Best classification checkpoints maximize
+micro AP; best detection checkpoints maximize continuous mAP@0.5.
+
+Default launcher run names encode family, subset, and budgets; standalone run names
+append `_backbone_pretrain`. The launcher prints both locations. `RUN_NAME=your_run`
+selects an explicit folder under `RUNS_DIR` for all three models.
+
+### Attention models
+
+Configure `DELTA_ROOT`, `DELTA_TEACHER_CHECKPOINT`, `MATCHED_TRAIN_SUBSET`, and
+`P4_VALIDATION_MANIFEST` in `path.py`. Required local dependencies are the Delta
+fork's `baseline/evaluate_tracking.py`, `tracking.py`, and `lib/`; the released VID
+EfficientDet-D0 teacher checkpoint; and `scripts/compare_vid.py` for manifests and
+scoring. The local scripts are not bundled in Git. The environment also needs
+OmegaConf 2.3.0 and pycocotools.
+
+Export the fixed validation subset once if its manifest does not exist:
+
+```bash
+python scripts/compare_vid.py export --manifest splits/val100x20_seed7.json
+```
+
+Set `P4_VALIDATION_MANIFEST` to that file. In the attention launcher, set `BEST` to
+your trained joint EfficientNet/TinyNet detection checkpoint. Both variants inherit
+its TinyNet-D features and SSD weights; their 64→256 projection is newly initialized.
+The launcher pins one source checkpoint so both variants start from the same weights.
+
+Train or resume both the no-memory baseline and attention-memory student:
+
+```bash
+bash launchers/run_attention_experiments.sh train
+```
+
+Evaluate both best checkpoints without training:
+
+```bash
+bash launchers/run_attention_experiments.sh eval
+```
+
+Defaults are 100 detection epochs, batch 4, RMSprop with cosine decay from 0.001,
+and validation every 5,000 updates. Training samples one student frame after each
+keyframe from non-overlapping 10-frame windows. The launcher resumes each variant's
+latest checkpoint under `RUNS_DIR/p4_student/{none,p4}` and evaluates its best one.
+Best selection uses **student-frame COCO AP50**; evaluation also prints whole-sequence
+COCO AP50 and continuous AP50.
+
+**Current evaluation scope:** attention checkpoints require the exact saved
+validation manifest, including during evaluation. A checkpoint trained with the
+100-video manifest cannot currently be evaluated on a different full-validation
+manifest through this CLI. The manifest exporter also fixes the selection to
+100 videos × up to 20 frames; full-set attention evaluation needs a code change.
+
+## Direct Python: individual models and full validation
+
+Use these commands when you need one model rather than the launcher's complete
+experiment set. Activate `vision` first.
+
+### One LSTM model
 
 To train **one standalone or joint model**, choose any experiment from the table:
 
@@ -101,86 +176,38 @@ python train_lstm_models.py "${COMMON[@]}" --task detection \
 For full-training-set runs, omit `--video-ids` and leave training selection limits
 unset in `path.py`. Use a fresh output folder when changing the dataset or budget.
 
-The launcher resumes latest `classification.pt` / `detection.pt` automatically.
-For individual commands, add `--resume` pointing to that stage's latest checkpoint.
-Keep the saved training settings unchanged. Best classification checkpoints maximize
-micro AP; best detection checkpoints maximize continuous mAP@0.5.
+To resume either stage, repeat its command with `--resume` pointing to that
+stage's latest checkpoint, keeping the saved settings unchanged.
 
-Default launcher run names encode family, subset, and budgets; standalone run names
-append `_backbone_pretrain`. The launcher prints both locations. `RUN_NAME=your_run`
-selects an explicit folder under `RUNS_DIR` for all three models.
-
-## LSTM evaluation: subset or full validation set
-
-Set `CHECKPOINT` to a trained detector's `detection_best.pt`. Use `MODE=fixed` for
-joint models or `MODE=big` for **either** standalone model (its sole backbone).
+### One attention variant
 
 ```bash
-CHECKPOINT=/path/to/detection_best.pt
-MODE=fixed
-RESULTS="$(python path.py --get RESULTS_DIR)"
+python train_attention_models.py train --memory p4 \
+  --init-detector /path/to/detection_best.pt --run-dir /path/to/new_run --device cuda
+python train_attention_models.py eval --memory p4 \
+  --checkpoint /path/to/new_run/detection_best.pt --device cuda
+```
 
-# Fixed subset: 100 videos × up to 20 consecutive frames.
+Use `--memory none` for the baseline. To resume training, replace `--init-detector`
+with `--checkpoint /path/to/new_run/detection.pt` and keep the same run directory.
+
+### Full LSTM validation set
+
+Omit video/frame limits to evaluate all validation videos and frames. Use
+`--mode fixed` for joint models or `--mode big` for either standalone model.
+
+```bash
 python -m evaluate.evaluate_paired_vod \
-  --checkpoint "$CHECKPOINT" --mode "$MODE" --interval 8 \
-  --max-videos 100 --frames-per-video 20 --subset-seed 7 --seed 0 \
+  --checkpoint /path/to/detection_best.pt --mode fixed --interval 8 --seed 0 \
   --score-threshold 0 --max-detections 100 --warmup-frames 10 \
-  --no-losses --no-visuals --device cuda --output-dir "$RESULTS/my_subset_eval"
-
-# Full validation set: all videos and frames, with the same inference settings.
-python -m evaluate.evaluate_paired_vod \
-  --checkpoint "$CHECKPOINT" --mode "$MODE" --interval 8 --seed 0 \
-  --score-threshold 0 --max-detections 100 --warmup-frames 10 \
-  --no-losses --no-visuals --device cuda --output-dir "$RESULTS/my_full_eval"
+  --no-losses --no-visuals --device cuda --output-dir /path/to/new_full_eval
 ```
 
-Use fresh output directories and leave evaluation `video_ids` unset in `path.py`
-for full evaluation. Results include continuous mAP@0.5, per-class AP, FPS, and
-operation counts. Compare FPS on the same hardware/device with identical settings.
-
-## Attention training and evaluation
-
-Configure `DELTA_ROOT`, `DELTA_TEACHER_CHECKPOINT`, `MATCHED_TRAIN_SUBSET`, and
-`P4_VALIDATION_MANIFEST` in `path.py`. Required local dependencies are the Delta
-fork's `baseline/evaluate_tracking.py`, `tracking.py`, and `lib/`; the released VID
-EfficientDet-D0 teacher checkpoint; and `scripts/compare_vid.py` for manifests and
-scoring. The local scripts are not bundled in Git. The environment also needs
-OmegaConf 2.3.0 and pycocotools.
-
-Export the fixed validation subset once if its manifest does not exist:
-
-```bash
-python scripts/compare_vid.py export --manifest splits/val100x20_seed7.json
-```
-
-Set `P4_VALIDATION_MANIFEST` to that file. In the attention launcher, set `BEST` to
-your trained joint EfficientNet/TinyNet detection checkpoint. Both variants inherit
-its TinyNet-D features and SSD weights; their 64→256 projection is newly initialized.
-The launcher pins one source checkpoint so both variants start from the same weights.
-
-```bash
-bash launchers/run_attention_experiments.sh train
-bash launchers/run_attention_experiments.sh eval
-```
-
-Defaults are 100 detection epochs, batch 4, RMSprop with cosine decay from 0.001,
-and validation every 5,000 updates. Training samples one student frame after each
-keyframe from non-overlapping 10-frame windows. The launcher resumes each variant's
-latest checkpoint under `RUNS_DIR/p4_student/{none,p4}` and evaluates its best one.
-Best selection uses **student-frame COCO AP50**; evaluation also prints whole-sequence
-COCO AP50 and continuous AP50.
-
-For one variant, use `python train_attention_models.py train --memory p4
---init-detector /path/to/detection_best.pt --run-dir /path/to/new_run --device cuda`
-(or `--memory none`). To resume, replace `--init-detector` with
-`--checkpoint /path/to/new_run/detection.pt`. For evaluation, use action `eval`
-and `--checkpoint /path/to/new_run/detection_best.pt`.
-
-**Current evaluation scope:** attention checkpoints require the exact saved
-validation manifest, including during evaluation. A checkpoint trained with the
-100-video manifest cannot currently be evaluated on a different full-validation
-manifest through this CLI. The manifest exporter also fixes the selection to
-100 videos × up to 20 frames; full-set attention evaluation needs a code change.
+Leave evaluation `video_ids` unset in `path.py` and use a fresh output directory.
+For one model on the standard subset, add `--max-videos 100 --frames-per-video 20
+--subset-seed 7`. Results include continuous mAP@0.5, per-class AP, FPS, and operation
+counts. Compare FPS on the same hardware/device with identical settings.
+Attention full-validation limitations are described above.
 
 ## Main modules and monitoring
 

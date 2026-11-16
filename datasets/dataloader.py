@@ -7,7 +7,7 @@ import random
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-from .paired_frames import stack_frames
+from .frame_views import stack_frames
 
 
 def configure_worker_sharing(worker_id, strategy):

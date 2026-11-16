@@ -8,7 +8,7 @@ import torch
 from torch import Tensor
 from PIL import Image
 import torchvision.transforms.functional as TF
-from .paired_frames import PairedFrames, stack_frames
+from .frame_views import PairedFrames, stack_frames
 
 
 Target = dict[str, object]

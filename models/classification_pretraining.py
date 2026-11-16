@@ -1,9 +1,9 @@
 """Multi-label classification with standalone backbones or a shared recurrent model."""
 import torch
 from torch import nn
-from datasets.paired_frames import PairedFrames, big_frames
+from datasets.frame_views import PairedFrames, big_frames
 from models.lstm_ssd_detector import LSTMSSD
-from models.joint_lstm_detector import PairedVOD, select_memory
+from models.joint_lstm_detector import JointLSTMDetector, select_memory
 from routing.paired_policy import random_training_schedule
 
 
@@ -13,7 +13,7 @@ class JointClassifier(nn.Module):
         if num_classes < 2:
             raise ValueError('Classification requires at least two classes.')
         # Reuse the exact detector topology, but retain no detection heads or anchors.
-        pair = detector if detector is not None else PairedVOD(LSTMSSD(model_config), paired_config)
+        pair = detector if detector is not None else JointLSTMDetector(LSTMSSD(model_config), paired_config)
         self.standalone = getattr(pair, 'standalone', None)
         if backbone_only and not self.standalone:
             raise ValueError('Backbone-only classification requires a standalone model.')

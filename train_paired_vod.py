@@ -1,7 +1,7 @@
 from path import parse_paths
 from utils.resume import resume_defaults
 import argparse
-from engine.paired_trainer import add_training_arguments, locked_training
+from engine.lstm_training import add_training_arguments, locked_training
 from paired_config import MemoryCorruption
 
 

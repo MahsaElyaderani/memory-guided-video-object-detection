@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 from paired_config import PolicyConfig
-from datasets.paired_frames import big_frames
+from datasets.frame_views import big_frames
 
 
 def frame_signature(frame):

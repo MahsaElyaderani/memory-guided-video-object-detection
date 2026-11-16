@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from paired_config import PairedConfig, MemoryCorruption
 from .lstm_ssd_detector import LSTMSSD
-from datasets.paired_frames import PairedFrames, big_frames
+from datasets.frame_views import PairedFrames, big_frames
 
 
 def select_memory(previous, new, commit):
@@ -33,7 +33,7 @@ def corrupt_memory(state, eligible, config: MemoryCorruption, generator=None):
     return tuple(value * scale for value in state), selected
 
 
-class PairedVOD(nn.Module):
+class JointLSTMDetector(nn.Module):
     """Joint big/small detector with shared LSTM memory and SSD heads."""
     def __init__(self, big: LSTMSSD, paired_config=None):
         super().__init__()
@@ -151,3 +151,7 @@ class PairedVOD(nn.Module):
             anchors = output["anchors"]
         return {"class_logits": torch.stack(logits, 1),
                 "box_regression": torch.stack(boxes, 1), "anchors": anchors}, state
+
+
+# Preserve existing imports and pickled class references.
+PairedVOD = JointLSTMDetector

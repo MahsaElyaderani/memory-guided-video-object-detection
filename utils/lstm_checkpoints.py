@@ -8,7 +8,7 @@ import torch
 
 from config import ModelConfig, SSDConfig, model_config_dict, checkpoint_model_config
 from models.lstm_ssd_detector import LSTMSSD
-from models.joint_lstm_detector import PairedVOD
+from models.joint_lstm_detector import JointLSTMDetector
 from paired_config import PairedConfig
 from routing.predictions import sha256_file
 from utils.checkpoints import model_from_checkpoint
@@ -53,7 +53,7 @@ def paired_from_payload(payload, expected_stage=None):
         raise ValueError("Unknown paired checkpoint stage.")
     if expected_stage is not None and payload["stage"] != expected_stage:
         raise ValueError(f"Expected paired {expected_stage} checkpoint.")
-    model = PairedVOD(LSTMSSD(checkpoint_model_config(payload["model_config"]),
+    model = JointLSTMDetector(LSTMSSD(checkpoint_model_config(payload["model_config"]),
                              SSDConfig(**payload["ssd_config"])),
                       PairedConfig(**payload["paired_config"]))
     model.load_state_dict(payload["model"], strict=True)
@@ -66,7 +66,7 @@ def initialize_pair(big_path, config, fast_init="timm", fast_path=None,
     if init_source == "joint_pretrain":
         from utils.joint_initialization import load_classification
         classifier, payload = load_classification(big_path)
-        model = PairedVOD(LSTMSSD(classifier.model_cfg), config)
+        model = JointLSTMDetector(LSTMSSD(classifier.model_cfg), config)
         classifier.transfer_to_detector(model)
         return model, payload, {"initialization": "joint_pretrain",
                                "big_checkpoint_sha256": sha256_file(big_path),
@@ -75,7 +75,7 @@ def initialize_pair(big_path, config, fast_init="timm", fast_path=None,
         if big_path or fast_path:
             raise ValueError("Fresh initialization does not take detector checkpoints.")
         from utils.joint_initialization import initialize_backbones
-        model = PairedVOD(LSTMSSD(model_config or ModelConfig()), config)
+        model = JointLSTMDetector(LSTMSSD(model_config or ModelConfig()), config)
         source = initialize_backbones(model.big.backbone, model.fast_backbone, backbone_weights, random_backbones)
         return model, {}, {"initialization": "fresh", "backbones": source}
     if init_source != "standalone_detection":
@@ -83,7 +83,7 @@ def initialize_pair(big_path, config, fast_init="timm", fast_path=None,
     payload = load_checkpoint(big_path)
     if payload.get("stage") != "stage2" or payload.get("validation_pending"):
         raise ValueError("standalone_detection initialization requires a native stage2 checkpoint with completed validation.")
-    model = PairedVOD(model_from_checkpoint(payload), config)
+    model = JointLSTMDetector(model_from_checkpoint(payload), config)
     source = {"big_checkpoint_sha256": sha256_file(big_path),
               "big_checkpoint_epoch": payload.get("epoch"), "fast_initialization": fast_init}
     is_timm = model.model_cfg.backbone == "timm_mobilenet_v2"

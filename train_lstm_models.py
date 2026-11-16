@@ -10,12 +10,12 @@ import torch
 from torch import nn
 from datasets.classification import VIDClassificationDataset
 from datasets.dataloader import budget_loader
-from engine.paired_trainer import (add_training_arguments, build_training_data, make_loader,
+from engine.lstm_training import (add_training_arguments, build_training_data, make_loader,
                                    criterion_for, train_detector_epoch)
-from engine.paired_evaluator import evaluate_paired, EvaluationOptions
+from engine.lstm_evaluation import evaluate_paired, EvaluationOptions
 from models.classification_pretraining import JointClassifier
 from models.lstm_ssd_detector import LSTMSSD
-from models.joint_lstm_detector import PairedVOD
+from models.joint_lstm_detector import JointLSTMDetector
 from models.ssd_head import SSDFeatureMaps, SSDBoxPredictor
 from paired_config import PairedConfig, PolicyConfig
 from path import parse_paths, RUNS_DIR
@@ -33,7 +33,7 @@ EXPERIMENTS = {'small_050': .5, 'big_120d': 1.2, 'joint_120d': 1.2,
                'joint_efficientnet_b0_tinynet_d': 1.}
 
 
-class MatchedDetector(PairedVOD):
+class MatchedDetector(JointLSTMDetector):
     def __init__(self, experiment, seed=0):
         if experiment not in EXPERIMENTS:
             raise ValueError(f'Unknown or archived experiment: {experiment}')

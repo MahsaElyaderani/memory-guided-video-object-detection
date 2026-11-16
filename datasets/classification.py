@@ -3,7 +3,7 @@ import random
 import torch
 from torchvision.transforms import functional as TF
 from datasets.transforms import resize_detection_views
-from datasets.paired_frames import stack_frames
+from datasets.frame_views import stack_frames
 
 
 class ClassificationTransform:

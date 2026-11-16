@@ -103,7 +103,7 @@ for EXP in $EXPERIMENTS; do
   MODE=big
   case "$EXP" in joint_*) MODE=fixed ;; esac
   printf '\nEvaluating %s\n' "$EXP"
-  python -u -m evaluate.evaluate_paired_vod \
+  python -u -m evaluate.evaluate_lstm_models \
     --checkpoint "$DIR/detection_best.pt" \
     --mode "$MODE" --interval 8 \
     --max-videos "$MAX_VAL_VIDEOS" --frames-per-video "$VAL_FRAMES_PER_VIDEO" \

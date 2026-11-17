@@ -21,10 +21,10 @@ from utils.evaluation_data import normalized_target, raw_detection_row
 from losses.multibox_loss import criterion_for
 from models.frozen_efficientdet_teacher import EfficientDetTeacher
 from models.attention_memory_detector import P4Student
-from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
+from routing.data import data_signature, guard_held_out, selected_dataset
 from routing.predictions import sha256_file
 from scripts.compare_vid import load_manifest, score_predictions
-from train_lstm_models import model_from_matched, save_matched_checkpoints, seed_training
+from train_lstm_models import save_matched_checkpoints, seed_training
 from utils.checkpoints import capture_rng, restore_rng
 from utils.runtime import run_lock, load_checkpoint, tqdm, write_json, early_stopping_reached
 from vid_categories import vid_to_dataset_labels
@@ -154,7 +154,7 @@ def run(args):
     saved = load_checkpoint(args.checkpoint) if args.checkpoint else None
     early_stopping = saved.get('early_stopping', False) if saved and args.early_stopping is None else bool(args.early_stopping)
     if saved and (saved.get('stage') != 'p4_student_v1' or saved['memory'] != args.memory or
-                  saved.get('projection', True) != (not args.no_projection) or
+                  saved.get('projection', True) is not False or
                   saved['teacher_sha256'] != teacher_hash or saved['label_to_name'] != val.label_to_name or
                   saved['category_id_to_label'] != val.category_id_to_label or
                   saved['manifest_sha256'] != manifest_hash):
@@ -168,19 +168,7 @@ def run(args):
             args.num_workers < 0 or not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
         raise ValueError('Invalid training budget, worker count or learning rate.')
     seed_training(args.seed)
-    detector = None
-    if args.init_detector:
-        source = load_checkpoint(args.init_detector)
-        if source.get('stage') != 'matched_detection' or source.get('experiment') not in (
-                'small_tinynet_d', 'joint_efficientnet_b0_tinynet_d'):
-            raise ValueError('Expected matched TinyNet-D standalone or EfficientNet/TinyNet-D joint detection checkpoint.')
-        validate_native_categories(source, val)
-        guard_held_out(source.get('training_signatures', []), val)
-        detector = model_from_matched(source)
-        del source
-    student = P4Student(args.memory, imagenet=not (saved or detector), detector=detector,
-                        projection=not args.no_projection).to(args.device)
-    del detector
+    student = P4Student(args.memory, imagenet=not saved).to(args.device)
     if saved:
         student.load_state_dict(saved['model'], strict=True)
     if args.action == 'eval':
@@ -215,7 +203,7 @@ def run(args):
     optimizer = torch.optim.RMSprop(student.parameters(), lr=args.learning_rate, alpha=.9, momentum=.9, eps=1.)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=budget)
     step, history = 0, []
-    init_source = sha256_file(args.init_detector) if args.init_detector else 'tinynet_d.in1k'
+    init_source = 'tinynet_d.in1k'
     run_id = saved['run_id'] if saved else uuid.uuid4().hex
     if saved:
         best_path = latest.with_name('detection_best.pt')
@@ -255,7 +243,7 @@ def run(args):
             history.append(dict(epoch=epoch+1, update=step, train_loss=loss_sum/count,
                                 validation={'student_COCO_AP50': metrics['student']['coco_AP50'], **metrics}))
         payload = dict(stage='p4_student_v1', run_id=run_id, memory=args.memory, initialization=init_source,
-                       projection=not args.no_projection,
+                       projection=False,
                        model=student.state_dict(), optimizer=optimizer.state_dict(), scheduler=scheduler.state_dict(),
                        updates=step, epoch=epoch+1, rng=capture_rng(), history=history, settings=settings,
                        teacher_sha256=teacher_hash, manifest_sha256=manifest_hash,
@@ -276,10 +264,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('train', 'eval'))
     parser.add_argument('--memory', required=True, choices=('none', 'p4'))
-    parser.add_argument('--no-projection', action='store_true', help='Use 64-channel SSD input; requires ImageNet initialization')
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument('--init-detector', type=Path, help='Matched detection checkpoint supplying TinyNet-D and SSD weights')
-    source.add_argument('--checkpoint', type=Path, help='Latest checkpoint for resume, or latest/best for evaluation')
+    parser.add_argument('--checkpoint', type=Path, help='Latest checkpoint for resume, or latest/best for evaluation')
     parser.add_argument('--run-dir', type=Path)
     parser.add_argument('--output-dir', type=Path, help='Fresh evaluation folder for predictions and metrics')
     parser.add_argument('--visuals', action='store_true', help='Also save annotated videos and frames')
@@ -302,16 +287,13 @@ def main():
     parser.add_argument('--seed', type=int)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
-    if args.no_projection and args.init_detector:
-        parser.error('--no-projection cannot be combined with --init-detector.')
     if (args.output_dir or args.visuals) and args.action != 'eval':
         parser.error('Exports are evaluation-only.')
     if args.visuals and not args.output_dir:
         parser.error('--visuals requires --output-dir.')
     if args.action == 'eval' and not args.checkpoint:
         parser.error('Evaluation requires --checkpoint.')
-    args.run_dir = args.run_dir or path.RUNS_DIR / (
-        'p4_student_imagenet_no_projection' if args.no_projection else 'p4_student') / args.memory
+    args.run_dir = args.run_dir or path.RUNS_DIR / 'p4_student_imagenet_no_projection' / args.memory
     args.task, args.prefetch_factor, args.sharing_strategy = 'detection', 1, None
     if args.action == 'train':
         with run_lock(args.run_dir/'detection.pt'):

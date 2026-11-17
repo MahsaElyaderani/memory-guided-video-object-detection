@@ -23,10 +23,10 @@ models update their own memory each frame; only big-backbone calls update joint
 memory.
 
 **Attention models** use TinyNet-D features from the current 160×160 frame to query
-cached teacher features. Retrieved features are added before a projection and SSD
-heads. The baseline uses current features alone. Set `BEST` in the attention
-launcher to a trained joint EfficientNet/TinyNet detector; both students inherit
-its backbone and SSD weights. Configure the external Delta fork, teacher weights,
+cached teacher features. Retrieved features are added to the student's 64-channel
+features and fed directly to SSD, without a projection. The baseline uses current
+features alone. Both students start from ImageNet-pretrained TinyNet-D and fresh SSD
+layers. Configure the external Delta fork, teacher weights,
 and validation manifest in `path.py`; the local `scripts/compare_vid.py` utility,
 OmegaConf, and pycocotools are also required.
 
@@ -40,17 +40,11 @@ OmegaConf, and pycocotools are also required.
 
 Resume uses latest checkpoints; keep the saved training settings unchanged.
 LSTM launchers print the selected run folders; `RUN_NAME` selects an explicit run.
-Attention runs are stored under `RUNS_DIR/p4_student/{none,p4}`.
-The attention launcher's optional second argument is `detector` (default) or
-`imagenet`. ImageNet initialization uses pretrained TinyNet-D with fresh SSD layers,
-stores runs under `RUNS_DIR/p4_student_imagenet/{none,p4}`, and requires no detector
-checkpoint. Both options resume their own latest checkpoints; use the same second
-argument for evaluation. Both still require the frozen teacher weights.
-An optional third argument, `projection-free`, is supported with `imagenet` only:
-both students feed their 64-channel features directly into SSD, with no 64→256
-projection. These runs use `RUNS_DIR/p4_student_imagenet_no_projection/{none,p4}`.
-Use the same arguments for training, resume, and evaluation. The default remains
-`projected`; existing checkpoints retain their original architecture.
+Attention runs are stored under `RUNS_DIR/p4_student_imagenet_no_projection/{none,p4}`.
+The launcher accepts only `train`, `eval`, or `all`; both variants use the same
+projection-free architecture and resume their own latest checkpoints. Both require
+the frozen teacher weights. Training and evaluation no longer need initialization
+or projection flags.
 [show_train_history.sh](launchers/show_train_history.sh) reports saved training and
 validation history, best scores, learning rates, and remaining updates.
 

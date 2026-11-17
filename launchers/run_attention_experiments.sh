@@ -2,12 +2,8 @@
 set -eo pipefail
 
 ACTION="${1:-all}"
-INITIALIZATION="${2:-detector}"
-ARCHITECTURE="${3:-projected}"
-if [[ $# -gt 3 || ! "$ACTION" =~ ^(all|train|eval)$ || ! "$INITIALIZATION" =~ ^(detector|imagenet)$ ||
-      ! "$ARCHITECTURE" =~ ^(projected|projection-free)$ ||
-      ( "$ARCHITECTURE" == projection-free && "$INITIALIZATION" != imagenet ) ]]; then
-  echo "Usage: bash launchers/run_attention_experiments.sh [all|train|eval] [detector|imagenet] [projected|projection-free] (projection-free requires imagenet)" >&2
+if [[ $# -gt 1 || ! "$ACTION" =~ ^(all|train|eval)$ ]]; then
+  echo "Usage: bash launchers/run_attention_experiments.sh [all|train|eval]" >&2
   exit 2
 fi
 
@@ -25,15 +21,7 @@ set -u
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 RUNS="$(python path.py --get RUNS_DIR)"
-ROOT="$RUNS/p4_student"
-[[ "$INITIALIZATION" != imagenet ]] || ROOT="$RUNS/p4_student_imagenet"
-MODEL_OPTIONS=()
-if [[ "$ARCHITECTURE" == projection-free ]]; then
-  ROOT="${ROOT}_no_projection"
-  MODEL_OPTIONS=(--no-projection)
-fi
-BEST="$RUNS/efficientnet_tinynet_subset25_class5_linear_det100_cosine/seed_0/joint_efficientnet_b0_tinynet_d/detection_best.pt"
-INIT="$ROOT/joint_init.pt"
+ROOT="$RUNS/p4_student_imagenet_no_projection"
 
 if [[ "$ACTION" != eval ]]; then
   for MODE in none p4; do
@@ -41,15 +29,10 @@ if [[ "$ACTION" != eval ]]; then
     SOURCE=()
     if [[ -f "$DIR/detection.pt" ]]; then
       SOURCE=(--checkpoint "$DIR/detection.pt")
-    elif [[ "$INITIALIZATION" == detector ]]; then
-      # The joint trainer replaces its best file atomically. Keep one version for both students.
-      mkdir -p "$ROOT"
-      [[ -f "$INIT" ]] || ln "$BEST" "$INIT"
-      SOURCE=(--init-detector "$INIT")
     fi
     printf 'Training %s using %s\n' "$MODE" "${SOURCE[1]:-ImageNet backbone weights}"
     python -u train_attention_models.py train --memory "$MODE" --run-dir "$DIR" ${SOURCE[@]+"${SOURCE[@]}"} \
-      ${MODEL_OPTIONS[@]+"${MODEL_OPTIONS[@]}"} ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --device cuda
+      ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --device cuda
   done
 fi
 
@@ -62,7 +45,7 @@ if [[ "$ACTION" != train ]]; then
     [[ -f "$BEST_STUDENT" ]] || { echo "Missing best checkpoint: $BEST_STUDENT" >&2; exit 1; }
     printf 'Evaluating %s using %s\n' "$MODE" "$BEST_STUDENT"
     python -u train_attention_models.py eval --memory "$MODE" --checkpoint "$BEST_STUDENT" --device cuda \
-      --output-dir "$OUT/$MODE" --visuals ${MODEL_OPTIONS[@]+"${MODEL_OPTIONS[@]}"}
+      --output-dir "$OUT/$MODE" --visuals
   done
   printf 'Evaluation results: %s\n' "$OUT"
 fi

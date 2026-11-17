@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from datasets.imagenet_vid import ImageNetVIDDataset
+from datasets.dataset_imagenetvid import DetectionDataset
 from datasets.transforms import EvalTransform
 from utils.runtime import select_video_subset
 from .predictions import sha256_file
@@ -27,7 +27,7 @@ def selected_dataset(args, image_size=320, clip_length=1, clip_stride=1, interpo
             raise ValueError(f'Duplicate IDs in {field}.')
     # Do not retain a second full annotation tree while constructing the dataset.
     del raw, ids
-    dataset = ImageNetVIDDataset(args.annotations, args.frames_root, EvalTransform(image_size, interpolation=interpolation, paired=paired),
+    dataset = DetectionDataset(args.annotations, args.frames_root, EvalTransform(image_size, interpolation=interpolation, paired=paired),
                                 clip_length=clip_length, clip_stride=clip_stride)
     if args.video_ids:
         selection = json.loads(Path(args.video_ids).read_text())

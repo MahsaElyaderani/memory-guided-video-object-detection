@@ -8,7 +8,7 @@ import uuid
 
 import torch
 from torch import nn
-from datasets.imagenet_vid import VIDClassificationDataset
+from datasets.dataset_imagenetvid import ClassificationDataset
 from datasets.dataloader import budget_loader
 from engine.lstm_training import (add_training_arguments, build_training_data, make_loader,
                                    train_detector_epoch)
@@ -359,8 +359,8 @@ def train(args):
         return resume
     history, run_id = (list(resume['history']), resume['run_id']) if resume else ([], uuid.uuid4().hex)
     if args.task == 'classification':
-        train_data = VIDClassificationDataset(train_data, model.model_cfg.backbone, True)
-        val_data = VIDClassificationDataset(val_data, model.model_cfg.backbone, False)
+        train_data = ClassificationDataset(train_data, model.model_cfg.backbone, True)
+        val_data = ClassificationDataset(val_data, model.model_cfg.backbone, False)
 
     def checkpoint(epoch, stats, budget=None, scheduler=None, validate=True):
         rng = capture_rng()

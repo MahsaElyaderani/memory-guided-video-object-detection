@@ -14,7 +14,7 @@ from PIL import Image
 from .transforms import ClassificationTransform, EvalTransform, Target
 
 
-class ImageNetVIDDataset(Dataset):
+class DetectionDataset(Dataset):
     """ JSON Annotations contain: ``videos``, ``images``, ``annotations`` and ``categories``.
     Image records must contain ``video_id`` and preferably ``frame_id``.
 
@@ -174,7 +174,7 @@ class ImageNetVIDDataset(Dataset):
             yield frames[0], targets[0]
 
 
-class VIDClassificationDataset(torch.utils.data.Dataset):
+class ClassificationDataset(torch.utils.data.Dataset):
     def __init__(self, detection_dataset, backbone, training=True):
         if detection_dataset.clip_length != 1 or detection_dataset.num_classes != 30:
             raise ValueError('Classification requires single frames with all 30 VID categories.')

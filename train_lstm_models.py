@@ -25,7 +25,7 @@ from engine.classification_training import classification_epoch
 from utils.checkpoints import capture_rng, restore_rng
 from utils.joint_initialization import make_joint_config
 from utils.lstm_checkpoints import lstm_metadata
-from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint
+from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint, early_stopping_reached
 from routing.predictions import sha256_file
 from utils.resume import resume_defaults, saved_arguments, restore_optimizer
 
@@ -118,6 +118,8 @@ def parse_args(argv=None):
     parser.add_argument('--experiment', choices=tuple(EXPERIMENTS), required=True)
     parser.add_argument('--lr-schedule', choices=('constant', 'linear', 'cosine'), default='constant')
     parser.add_argument('--validate-every', type=int, default=5000, help='Budgeted validation interval in optimizer updates.')
+    parser.add_argument('--early-stopping', action=argparse.BooleanOptionalAction, default=None,
+                        help='Stop after 10 validations without improvement; resume inherits the saved setting')
     parser.add_argument('--steps', type=int, default=3,
                         help='Recurrent classification steps; backbone-only standalone models use one pass.')
     parser.add_argument('--init-checkpoint')
@@ -166,7 +168,7 @@ def save_matched_checkpoints(payload, destination, select_best=True):
     atomic_save_checkpoint(payload, destination)
 
 
-def train_budgeted(model, train_data, args, optimizer, resume, checkpoint):
+def train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping=False):
     batches = min(len(train_data) // args.batch_size, args.max_batches or len(train_data))
     budget = {'epochs': args.epochs, 'total_updates': args.epochs * batches,
               'updates': 0, 'epoch': 1, 'batch': 0, 'sampling_version': 1}
@@ -200,6 +202,8 @@ def train_budgeted(model, train_data, args, optimizer, resume, checkpoint):
     print(f"Budget: {budget['updates']}/{budget['total_updates']} updates; {args.lr_schedule} LR, no warmup.", flush=True)
     if budget['updates'] >= budget['total_updates']:
         return resume
+    if resume and early_stopping_reached(resume, early_stopping, args.checkpoint_out):
+        return resume
     # Step only after a successful optimizer update, including inside the reused loops.
     hook = optimizer.register_step_post_hook(lambda *_: scheduler.step())
     loop_args = copy(args)
@@ -228,6 +232,8 @@ def train_budgeted(model, train_data, args, optimizer, resume, checkpoint):
             validate = budget['updates'] % args.validate_every == 0 or budget['updates'] == budget['total_updates']
             stats['interval_updates'] = count
             payload = checkpoint(budget['epoch'], stats, dict(budget), scheduler.state_dict(), validate)
+            if validate and early_stopping_reached(payload, early_stopping):
+                break
     finally:
         hook.remove()
     return payload
@@ -272,8 +278,10 @@ def expand_subset_checkpoint(resume, definition, signatures, args):
 
 
 def train(args):
+    requested_stop = vars(args).pop('early_stopping', None)
     expanding = vars(args).pop('expand_subset', False)  # One-time action, never inherited on resume.
     resume = load_checkpoint(args.resume) if args.resume else None
+    early_stopping = resume.get('early_stopping', False) if resume and requested_stop is None else bool(requested_stop)
     source = load_checkpoint(args.init_checkpoint) if args.init_checkpoint and not resume else None
     if resume and (resume['experiment'] != args.experiment or resume['stage'] != 'matched_' + args.task):
         raise ValueError('Resume must use the same matched experiment and stage.')
@@ -391,6 +399,8 @@ def train(args):
             payload['classification_architecture'] = 'backbone_only'
         if budget:
             payload.update(budget=budget, scheduler=scheduler, global_step=budget['updates'])
+        if early_stopping:
+            payload['early_stopping'] = True
         save_matched_checkpoints(payload, destination, select_best=validate)
         suffix = f" update {budget['updates']}" if budget else ''
         print(f'Saved {args.experiment} {args.task} epoch {epoch}{suffix}: {destination}', flush=True)
@@ -404,7 +414,9 @@ def train(args):
             # Keep the source best as the baseline even if every new validation is worse.
             atomic_save_checkpoint(resume, best_path, overwrite=False)
             atomic_save_checkpoint(resume, destination, overwrite=False)
-        return train_budgeted(model, train_data, args, optimizer, resume, checkpoint)
+        return train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping)
+    if early_stopping_reached(resume, early_stopping, destination):
+        return resume
     for epoch in range(start + 1, args.epochs + 1):
         # Identical sampling/augmentation streams across architectures; exact epoch-boundary resume.
         seed_training(args.seed + epoch)
@@ -415,6 +427,8 @@ def train(args):
             if model.standalone:
                 stats.pop('big_selections')  # The random schedule is consumed for reproducibility, but unused.
         payload = checkpoint(epoch, stats)
+        if early_stopping_reached(payload, early_stopping):
+            break
     return payload
 
 

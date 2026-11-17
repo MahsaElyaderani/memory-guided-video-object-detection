@@ -17,6 +17,14 @@ case "$FAMILY" in
   *) echo "Unknown family: $FAMILY" >&2; exit 2 ;;
 esac
 
+STOP_OPTIONS=()
+case "${EARLY_STOPPING:-}" in
+  1) STOP_OPTIONS=(--early-stopping) ;;
+  0) STOP_OPTIONS=(--no-early-stopping) ;;
+  '') ;;
+  *) echo "EARLY_STOPPING must be 0 or 1" >&2; exit 2 ;;
+esac
+
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate vision
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
@@ -64,7 +72,7 @@ for EXP in $EXPERIMENTS; do
   if [[ -f "$DIR/detection.pt" ]]; then DET_RESUME=(--resume "$DIR/detection.pt"); fi
   printf '\nTraining %s\n' "$EXP"
   python -u train_lstm_models.py \
-    --experiment "$EXP" --task classification \
+    --experiment "$EXP" --task classification ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
     --video-ids "$TRAIN_SUBSET" \
     --checkpoint-out "$DIR/classification.pt" "${CLASS_RESUME[@]}" \
     --epochs "$CLASS_EPOCHS" --lr-schedule linear --validate-every "$VALIDATE_EVERY" \
@@ -74,7 +82,7 @@ for EXP in $EXPERIMENTS; do
     --subset-seed "$SUBSET_SEED" --seed 0 --device cuda
 
   python -u train_lstm_models.py \
-    --experiment "$EXP" --task detection \
+    --experiment "$EXP" --task detection ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
     --video-ids "$TRAIN_SUBSET" \
     --checkpoint-out "$DIR/detection.pt" "${DET_RESUME[@]}" \
     --init-checkpoint "$DIR/classification_best.pt" \

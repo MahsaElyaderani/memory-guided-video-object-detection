@@ -11,6 +11,14 @@ if [[ $# -gt 3 || ! "$ACTION" =~ ^(all|train|eval)$ || ! "$INITIALIZATION" =~ ^(
   exit 2
 fi
 
+STOP_OPTIONS=()
+case "${EARLY_STOPPING:-}" in
+  1) STOP_OPTIONS=(--early-stopping) ;;
+  0) STOP_OPTIONS=(--no-early-stopping) ;;
+  '') ;;
+  *) echo "EARLY_STOPPING must be 0 or 1" >&2; exit 2 ;;
+esac
+
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate vision
 set -u
@@ -41,7 +49,7 @@ if [[ "$ACTION" != eval ]]; then
     fi
     printf 'Training %s using %s\n' "$MODE" "${SOURCE[1]:-ImageNet backbone weights}"
     python -u train_attention_models.py train --memory "$MODE" --run-dir "$DIR" ${SOURCE[@]+"${SOURCE[@]}"} \
-      ${MODEL_OPTIONS[@]+"${MODEL_OPTIONS[@]}"} --device cuda
+      ${MODEL_OPTIONS[@]+"${MODEL_OPTIONS[@]}"} ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --device cuda
   done
 fi
 

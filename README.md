@@ -54,6 +54,13 @@ Use the same arguments for training, resume, and evaluation. The default remains
 [show_train_history.sh](launchers/show_train_history.sh) reports saved training and
 validation history, best scores, learning rates, and remaining updates.
 
+Optional early stopping: set `EARLY_STOPPING=1` for either launcher (or pass
+`--early-stopping` directly). Each stage stops after 10 validations without a strict
+improvement in its best-checkpoint metric; ties count. Latest and best checkpoints
+are kept. Resume inherits the setting and counts saved validation history, including
+when enabling it on an older run. `EARLY_STOPPING=0` / `--no-early-stopping` disables
+it. Fresh runs default to disabled; the original LR schedule/budget is unchanged.
+
 ## Eval
 
 Select the same launcher's `eval` action to evaluate best detection checkpoints

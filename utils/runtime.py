@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
+import math
 import os
 import random
 import tempfile
@@ -14,6 +15,25 @@ from tqdm.auto import tqdm
 
 
 LOSS_KEYS = ("total_loss", "classification_loss", "localization_loss")
+
+
+def early_stopping_reached(payload, enabled, destination=None):
+    """Count consecutive non-improving validations from history, including on resume."""
+    if not enabled or not payload or not payload.get('history'):
+        return False
+    key = payload.get('selection_metric',
+                      'bce_loss' if payload['stage'] == 'matched_classification' else 'mAP@0.5')
+    scores = [row['validation'][key] for row in payload['history']]
+    if not all(math.isfinite(score) for score in scores):
+        raise ValueError('Early stopping requires finite validation scores.')
+    best = (min if key == 'bce_loss' else max)(range(len(scores)), key=scores.__getitem__)
+    if len(scores) - 1 - best < 10:
+        return False
+    if destination is not None and not payload.get('early_stopping', False):
+        payload['early_stopping'] = True
+        atomic_save_checkpoint(payload, destination)
+    print(f'Early stopping: 10 validations without improved {key}; best={scores[best]:.6f}.', flush=True)
+    return True
 
 
 def loss_postfix(current, totals, count):

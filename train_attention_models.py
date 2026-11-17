@@ -26,7 +26,7 @@ from routing.predictions import sha256_file
 from scripts.compare_vid import load_manifest, score_predictions
 from train_lstm_models import model_from_matched, save_matched_checkpoints, seed_training
 from utils.checkpoints import capture_rng, restore_rng
-from utils.runtime import run_lock, load_checkpoint, tqdm, write_json
+from utils.runtime import run_lock, load_checkpoint, tqdm, write_json, early_stopping_reached
 from vid_categories import vid_to_dataset_labels
 
 
@@ -152,6 +152,7 @@ def run(args):
     teacher = EfficientDetTeacher(args.delta_root or path.DELTA_ROOT, args.teacher_checkpoint or path.DELTA_TEACHER_CHECKPOINT, args.device)
     latest = args.run_dir / 'detection.pt'
     saved = load_checkpoint(args.checkpoint) if args.checkpoint else None
+    early_stopping = saved.get('early_stopping', False) if saved and args.early_stopping is None else bool(args.early_stopping)
     if saved and (saved.get('stage') != 'p4_student_v1' or saved['memory'] != args.memory or
                   saved.get('projection', True) != (not args.no_projection) or
                   saved['teacher_sha256'] != teacher_hash or saved['label_to_name'] != val.label_to_name or
@@ -227,6 +228,8 @@ def run(args):
         if not 0 <= step <= budget or scheduler.last_epoch != step or scheduler.T_max != budget:
             raise ValueError('Optimizer update count differs from saved cosine schedule.')
     criterion = criterion_for(student)
+    if early_stopping_reached(saved, early_stopping, latest):
+        return saved
     while step < budget:
         epoch, offset = divmod(step, batches)
         count = min(batches-offset, args.validate_every-step % args.validate_every)
@@ -258,11 +261,15 @@ def run(args):
                        teacher_sha256=teacher_hash, manifest_sha256=manifest_hash,
                        label_to_name=val.label_to_name, category_id_to_label=val.category_id_to_label,
                        selection_metric='student_COCO_AP50')
+        if early_stopping:
+            payload['early_stopping'] = True
         save_matched_checkpoints(payload, latest, select_best=validate)
         print(f'{step}/{budget} updates; loss={loss_sum/count:.4f}; saved {latest}', flush=True)
         if validate:
             print(f"Student COCO AP50={metrics['student']['coco_AP50']:.4f}; "
                   f"whole sequence={metrics['sequence']['coco_AP50']:.4f}", flush=True)
+            if early_stopping_reached(payload, early_stopping):
+                break
 
 
 def main():
@@ -288,6 +295,8 @@ def main():
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--max-batches', type=int, help='Cap updates per epoch for a short run')
     parser.add_argument('--validate-every', type=int)
+    parser.add_argument('--early-stopping', action=argparse.BooleanOptionalAction, default=None,
+                        help='Stop after 10 validations without improvement; resume inherits the saved setting')
     parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--learning-rate', type=float)
     parser.add_argument('--seed', type=int)

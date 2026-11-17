@@ -52,7 +52,3 @@ def paired_from_payload(payload, expected_stage=None):
                       PairedConfig(**payload["paired_config"]))
     model.load_state_dict(payload["model"], strict=True)
     return model
-
-
-# Preserve existing imports; serialized checkpoint keys remain unchanged.
-paired_metadata = lstm_metadata

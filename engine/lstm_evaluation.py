@@ -260,9 +260,3 @@ def export_lstm_run(model, dataset, policy, options, output_dir, corruption=None
             exporter.close()
         write_json({"status": "failed", "error": str(error)}, output / "run_status.json")
         raise
-
-
-# Preserve existing function imports.
-evaluate_paired = evaluate_lstm
-select_paired_frames = select_evaluation_frames
-export_paired_run = export_lstm_run

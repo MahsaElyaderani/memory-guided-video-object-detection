@@ -111,7 +111,3 @@ class DetectionVideoExporter:
             if not cv2.imwrite(str(path), canvas):
                 raise IOError(f"Could not save {path}.")
         self.video_index[-1]["num_frames"] += 1
-
-
-# Preserve existing imports and pickled class references.
-PairedVideoExporter = DetectionVideoExporter

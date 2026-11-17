@@ -152,7 +152,3 @@ class JointLSTMDetector(nn.Module):
             anchors = output["anchors"]
         return {"class_logits": torch.stack(logits, 1),
                 "box_regression": torch.stack(boxes, 1), "anchors": anchors}, state
-
-
-# Preserve existing imports and pickled class references.
-PairedVOD = JointLSTMDetector

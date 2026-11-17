@@ -9,9 +9,6 @@ from config import SSDConfig, model_config_dict, checkpoint_model_config
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector
 from lstm_config import PairedConfig
-# Re-export shared helpers so existing checkpoint imports remain valid.
-from utils.runtime import (load_checkpoint, atomic_save_checkpoint, epoch_checkpoint_path,
-                           write_json, run_lock, save_training_payload)
 
 
 PAIRED_FORMAT_VERSION = 1
@@ -57,11 +54,5 @@ def paired_from_payload(payload, expected_stage=None):
     return model
 
 
-def load_joint_detector(path, expected_stage=None):
-    payload = load_checkpoint(path)
-    return paired_from_payload(payload, expected_stage), payload
-
-
 # Preserve existing imports; serialized checkpoint keys remain unchanged.
 paired_metadata = lstm_metadata
-load_pair = load_joint_detector

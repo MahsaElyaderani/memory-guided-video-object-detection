@@ -114,12 +114,6 @@ def load_checkpoint(path):
     return torch.load(path, **options)
 
 
-def epoch_checkpoint_path(path, epoch):
-    path = Path(path)
-    suffix = path.suffix or ".pt"
-    return path.with_name(f"{path.stem}_epoch_{epoch:04d}{suffix}")
-
-
 def write_json(payload, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,17 +141,3 @@ def run_lock(destination):
         yield
     finally:
         lock.unlink(missing_ok=True)
-
-
-def save_training_payload(payload, destination):
-    numbered = epoch_checkpoint_path(destination, payload["epoch"])
-    if numbered.exists():
-        previous = load_checkpoint(numbered)
-        if previous.get("run_id") != payload["run_id"] or previous.get("epoch") != payload["epoch"]:
-            raise FileExistsError(f"Different run owns checkpoint {numbered}.")
-        if not previous.get("validation_pending"):
-            raise FileExistsError(f"Completed epoch checkpoint is immutable: {numbered}.")
-        atomic_save_checkpoint(payload, numbered)
-    else:
-        atomic_save_checkpoint(payload, numbered, overwrite=False)
-    atomic_save_checkpoint(payload, destination)

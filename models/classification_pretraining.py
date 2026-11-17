@@ -8,24 +8,22 @@ from routing.backbone_schedule import random_training_schedule
 
 
 class JointClassifier(nn.Module):
-    def __init__(self, model_config, paired_config, num_classes, *, detector=None, backbone_only=False):
+    def __init__(self, model_config, paired_config, num_classes, *, detector=None):
         super().__init__()
         if num_classes < 2:
             raise ValueError('Classification requires at least two classes.')
         # Reuse the exact detector topology, but retain no detection heads or anchors.
         pair = detector if detector is not None else JointLSTMDetector(LSTMSSD(model_config), paired_config)
         self.standalone = getattr(pair, 'standalone', None)
-        if backbone_only and not self.standalone:
-            raise ValueError('Backbone-only classification requires a standalone model.')
-        self.backbone_only = backbone_only
+        self.backbone_only = bool(self.standalone)
         self.model_cfg, self.paired_config = model_config, paired_config
         self.ssd_cfg = pair.ssd_cfg
         self.big_backbone = pair.big.backbone
         self.small_backbone = pair.fast_backbone
         self.small_projection = pair.small_projection
-        self.lstm = None if backbone_only else pair.big.lstm
+        self.lstm = None if self.backbone_only else pair.big.lstm
         self.pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = nn.Linear(model_config.mobilenet_output_channels if backbone_only
+        self.classifier = nn.Linear(model_config.mobilenet_output_channels if self.backbone_only
                                     else model_config.lstm_channels, num_classes)
         self.num_classes = num_classes
 
@@ -61,16 +59,14 @@ class JointClassifier(nn.Module):
             # Each step sees the same image. Reuse the features with their gradients attached
             # so losses at all recurrent steps can update the backbone.
             if step == 0 or not reuse_features:
-                large = self.big_backbone(small if self.standalone == 'small' else big_frames(frames))
-                if self.standalone == 'small':
-                    large = self.small_projection(large)
-                fast = large if self.standalone else self.small_projection(self.small_backbone(small))
+                large = self.big_backbone(big_frames(frames))
+                fast = self.small_projection(self.small_backbone(small))
             if large.shape != fast.shape or large.shape[1:] != (self.model_cfg.mobilenet_output_channels, 10, 10):
                 raise ValueError('Joint backbone features do not match the shared LSTM input.')
             features = torch.where(use_big[:, step, None, None, None], large, fast)
             output, candidate = self.lstm(features, state)
             logits.append(self.classifier(self.pool(output).flatten(1)))
-            state = candidate if self.standalone else select_memory(state, candidate, use_big[:, step])
+            state = select_memory(state, candidate, use_big[:, step])
         return torch.stack(logits, 1)
 
     def transfer_to_detector(self, detector):

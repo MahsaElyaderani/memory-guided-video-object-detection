@@ -77,7 +77,7 @@ class MatchedDetector(JointLSTMDetector):
         return super().forward_selected(frames, state, use_big, small_commit)
 
 
-def build_model(experiment, task, seed, *, standalone_backbone_only=True):
+def build_model(experiment, task, seed):
     detector = MatchedDetector(experiment, seed)
     if task == 'detection':
         return detector
@@ -85,8 +85,7 @@ def build_model(experiment, task, seed, *, standalone_backbone_only=True):
         raise ValueError('Unknown matched task.')
     with torch.random.fork_rng(devices=[]):
         torch.random.default_generator.manual_seed(seed + 1)
-        return JointClassifier(detector.model_cfg, detector.paired_config, 30, detector=detector,
-                               backbone_only=bool(detector.standalone) and standalone_backbone_only)
+        return JointClassifier(detector.model_cfg, detector.paired_config, 30, detector=detector)
 
 
 def model_from_matched(payload):
@@ -96,11 +95,11 @@ def model_from_matched(payload):
         raise ValueError('Matched class mapping differs.')
     task = payload['stage'].removeprefix('matched_')
     architecture = payload.get('classification_architecture', 'recurrent')
-    if architecture not in ('recurrent', 'backbone_only') or (
-            architecture == 'backbone_only' and (task != 'classification' or payload['experiment'].startswith('joint_'))):
+    expected_architecture = ('backbone_only' if task == 'classification' and
+                             not payload['experiment'].startswith('joint_') else 'recurrent')
+    if architecture != expected_architecture:
         raise ValueError('Incompatible classification architecture metadata.')
-    model = build_model(payload['experiment'], task, payload['initialization_seed'],
-                        standalone_backbone_only=architecture == 'backbone_only')
+    model = build_model(payload['experiment'], task, payload['initialization_seed'])
     expected = lstm_metadata(model)
     if any(payload.get(key) != value for key, value in expected.items()):
         raise ValueError('Matched architecture/configuration differs.')

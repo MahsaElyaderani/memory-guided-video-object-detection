@@ -102,4 +102,4 @@ def validate_random_training_resume(payload):
     warmup_end = arguments.get('zero_memory_epochs', 0) + arguments.get('clean_memory_epochs', 0)
     if payload.get('epoch', 0) < warmup_end:
         raise ValueError('Checkpoint has unfinished small-model warmup, which has been removed. '
-                         'Use prepare_joint_training.py to explicitly start a new joint-training run.')
+                         'Use the archived source to continue this legacy training workflow.')

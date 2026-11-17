@@ -35,8 +35,6 @@ TRAIN_VALIDATION_FRAMES = VAL_FRAMES
 # Keys are existing CLI option names with '-' replaced by '_'.
 TASK_PATHS = {
     "train_matched": dict(checkpoint_out=None, init_checkpoint=None, resume=None, video_ids=None, val_video_ids=None),
-    "train_paired_vod": dict(big_checkpoint=None, fast_checkpoint=None, backbone_weights=None,
-                             resume=None, checkpoint_out=None, video_ids=None, val_video_ids=None),
     "evaluate": dict(checkpoint=None),
     "evaluate_paired_vod": dict(checkpoint=None,
                                output_dir=None, video_ids=None, precision_image_ids=None),
@@ -44,7 +42,6 @@ TASK_PATHS = {
     "compare_paired_runs": dict(runs=None, output_dir=None),  # runs: list of paths
     "compare_visual_runs": dict(run_a=None, run_b=None, output_dir=None),
     "sample_vid_videos": dict(output=None),
-    "prepare_joint_training": dict(checkpoint=None, checkpoint_out=None, big_checkpoint=None),
 }
 
 # Existing shell experiment selections; change these here when selecting another run.
@@ -71,7 +68,7 @@ def resolve_path(value):
 
 def task_paths(task):
     values = {}
-    if task in ("train_paired_vod", "train_matched"):
+    if task == "train_matched":
         values.update(annotations=TRAIN_ANNOTATIONS, frames_root=TRAIN_FRAMES,
                       val_annotations=TRAIN_VALIDATION_ANNOTATIONS,
                       val_frames_root=TRAIN_VALIDATION_FRAMES)
@@ -127,40 +124,6 @@ def required_path(name):
     if value is None:
         raise ValueError(f"Set {name} in {__file__} before running this command.")
     return value
-
-
-def resume_launcher(cli, destination):
-    """Generate a relocatable launcher while preserving non-path training arguments."""
-    import os
-    import shlex
-    data_names = {"--annotations": "TRAIN_ANNOTATIONS", "--frames-root": "TRAIN_FRAMES",
-                  "--val-annotations": "VAL_ANNOTATIONS", "--val-frames-root": "VAL_FRAMES"}
-    words, index, settings = [], 0, []
-    while index < len(cli):
-        flag = cli[index]
-        if flag in data_names:
-            name = data_names[flag]
-            if name not in settings:
-                settings.append(name)
-            words += [flag, '"$' + name + '"']
-            index += 2
-        elif flag in ("--resume", "--checkpoint-out"):
-            words += [flag, '"$CHECKPOINT"']
-            index += 2
-        else:
-            words.append(shlex.quote(flag))
-            index += 1
-    # Locate the project from the launcher's directory, including external run folders.
-    relative_root = os.path.relpath(PROJECT_ROOT, Path(destination).parent)
-    assignments = "".join(name + '="$("$PYTHON" path.py --get ' + name + ')"\n'
-                          for name in settings)
-    return ('#!/usr/bin/env bash\nset -euo pipefail\n'
-            'SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"\n'
-            'CHECKPOINT="$SCRIPT_DIR"/' + shlex.quote(Path(destination).name) + '\n'
-            'cd -- "$SCRIPT_DIR"/' + shlex.quote(relative_root) + '\n'
-            'PYTHON="$(python3 path.py --get PYTHON)"\n'
-            + assignments + 'export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1\n'
-            'exec "$PYTHON" -u train_paired_vod.py ' + ' '.join(words) + '\n')
 
 
 if __name__ == "__main__":

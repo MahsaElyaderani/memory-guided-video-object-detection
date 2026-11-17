@@ -262,7 +262,7 @@ def export_lstm_run(model, dataset, policy, options, output_dir, corruption=None
         raise
 
 
-# Preserve existing imports, including engine.paired_evaluator.
+# Preserve existing function imports.
 evaluate_paired = evaluate_lstm
 select_paired_frames = select_evaluation_frames
 export_paired_run = export_lstm_run

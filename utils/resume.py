@@ -38,9 +38,6 @@ def resume_defaults(parser, args, argv=None, payload=None):
     if "paired_config" in payload:
         saved.update(payload["paired_config"])
         saved["train_bn"] = not payload["paired_config"].get("freeze_bn_stats", True)
-    if "training_signature" in payload:
-        saved.update({key: value for key, value in payload["training_signature"].items()
-                      if key in ("batch_size", "clip_stride", "seed")})
     for key, value in saved.items():
         if key == "validation_interval":
             key = "big_call_interval"

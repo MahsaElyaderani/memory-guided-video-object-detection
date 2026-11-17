@@ -155,7 +155,7 @@ class VideoExporter:
         }, allow_nan=False) + '\n')
 
 
-class PairedVideoExporter:
+class DetectionVideoExporter:
     def __init__(self, dataset, output_dir, variant, draw_score_threshold=.3, max_side=640,
                  playback_fps=30., save_frames_every=30):
         if (not 0 <= draw_score_threshold <= 1 or max_side < 1 or save_frames_every < 0 or
@@ -199,3 +199,7 @@ class PairedVideoExporter:
             if not cv2.imwrite(str(path), canvas):
                 raise IOError(f"Could not save {path}.")
         self.video_index[-1]["num_frames"] += 1
+
+
+# Preserve existing imports and pickled class references.
+PairedVideoExporter = DetectionVideoExporter

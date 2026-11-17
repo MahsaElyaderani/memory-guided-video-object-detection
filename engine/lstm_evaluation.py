@@ -233,11 +233,11 @@ def evaluate_lstm(model, dataset, policy, options=None, corruption=None,
 def export_lstm_run(model, dataset, policy, options, output_dir, corruption=None,
                       precision_ids=None, visual_options=None):
     from dataclasses import asdict
-    from engine.visualizer import PairedVideoExporter
+    from engine.visualizer import DetectionVideoExporter
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=False)
     write_json({"status": "running"}, output / "run_status.json")
-    exporter = PairedVideoExporter(dataset, output, policy.mode, **visual_options) if visual_options else None
+    exporter = DetectionVideoExporter(dataset, output, policy.mode, **visual_options) if visual_options else None
     try:
         with (output / "detections.jsonl").open("x") as detections, (output / "routing.jsonl").open("x") as routing:
             def save(record, target, prediction, route):

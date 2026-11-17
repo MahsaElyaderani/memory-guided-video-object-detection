@@ -12,22 +12,25 @@ from .frame_views import stack_frames
 
 
 def configure_worker_sharing(worker_id, strategy):
+    """Apply the requested tensor-sharing strategy inside a spawned worker."""
     # Spawned workers do not inherit the parent's Python module settings.
     torch.multiprocessing.set_sharing_strategy(strategy)
 
 
 def classification_collate(batch):
+    """Stack image views and their 30-class multi-hot targets into a batch."""
     images, labels = zip(*batch)
     return stack_frames(images), torch.stack(labels)
 
 
-def collate_pairs(batch):
+def collate_attention_clips(batch):
+    """Keep teacher keyframes as a list; stack student clips and retain variable-length box targets."""
     keys, current, targets = zip(*batch)
     return list(keys), torch.stack(current), list(targets)
 
 
-def video_collate_fn(batch: Sequence[Tuple[Tensor, list[dict]]]):
-    """Collate fixed-length video clips while preserving ragged GT boxes."""
+def collate_lstm_clips(batch: Sequence[Tuple[Tensor, list[dict]]]):
+    """Stack equal-length clips (including both RGB views); keep per-frame box targets as lists."""
     if not batch:
         raise ValueError("Cannot collate an empty batch.")
     frames, targets = zip(*batch)
@@ -47,6 +50,7 @@ def build_dataloader(
     prefetch_factor: int = 1,
     sharing_strategy: str | None = None,
 ) -> DataLoader:
+    """Build an epoch-based LSTM clip loader with optional persistent workers."""
     if batch_size <= 0:
         raise ValueError("batch_size must be positive.")
     if prefetch_factor <= 0:
@@ -67,7 +71,7 @@ def build_dataloader(
         num_workers=num_workers,
         pin_memory=pin_memory,
         drop_last=drop_last,
-        collate_fn=video_collate_fn,
+        collate_fn=collate_lstm_clips,
         persistent_workers=(num_workers > 0),
         **loader_options,
     )
@@ -76,12 +80,15 @@ def build_dataloader(
 class SeededSamples(Dataset):
     """Opt-in reproducible augmentation, independent of worker count/prefetch."""
     def __init__(self, dataset, seed):
+        """Wrap a dataset with a base seed for reproducible sample augmentation."""
         self.dataset, self.seed = dataset, seed
 
     def __len__(self):
+        """Keep the wrapped dataset length."""
         return len(self.dataset)
 
     def __getitem__(self, index):
+        """Seed this sample by index, then restore the caller's Python/PyTorch RNG state."""
         state = random.getstate()
         try:
             with torch.random.fork_rng(devices=[]):
@@ -110,5 +117,5 @@ def budget_loader(dataset, args, epoch, start_batch, batches, *, collate_fn=None
     return DataLoader(SeededSamples(dataset, seed), sampler=indices, batch_size=args.batch_size,
                       num_workers=args.num_workers, drop_last=True, generator=generator,
                       pin_memory=torch.device(args.device).type == 'cuda',
-                      collate_fn=collate_fn or (classification_collate if args.task == 'classification' else video_collate_fn),
+                      collate_fn=collate_fn or (classification_collate if args.task == 'classification' else collate_lstm_clips),
                       **options)

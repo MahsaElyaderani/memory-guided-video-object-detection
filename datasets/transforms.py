@@ -16,6 +16,7 @@ Target = dict[str, object]
 
 
 def _normalize_boxes_xyxy(boxes: Tensor, width: int, height: int) -> Tensor:
+    """Convert absolute xyxy pixels to clipped [0, 1] coordinates, retaining empty boxes."""
     if boxes.numel() == 0:
         return boxes.reshape(0, 4).to(dtype=torch.float32)
     scale = boxes.new_tensor([width, height, width, height])
@@ -23,6 +24,7 @@ def _normalize_boxes_xyxy(boxes: Tensor, width: int, height: int) -> Tensor:
 
 
 def _box_iou_xyxy(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+    """Compute pairwise intersection-over-union for two sets of xyxy boxes."""
     if boxes1.numel() == 0 or boxes2.numel() == 0:
         return boxes1.new_zeros((boxes1.shape[0], boxes2.shape[0]))
     lt = torch.maximum(boxes1[:, None, :2], boxes2[None, :, :2])
@@ -39,6 +41,7 @@ def _box_iou_xyxy(boxes1: Tensor, boxes2: Tensor) -> Tensor:
 def _prepare_targets_normalized(
     images: Sequence[Image.Image], targets: Sequence[Target]
 ) -> List[Target]:
+    """Copy targets, normalize boxes per image, and retain original image sizes."""
     if len(images) != len(targets):
         raise ValueError("images and targets must have the same length.")
     out: List[Target] = []
@@ -58,7 +61,7 @@ def _prepare_targets_normalized(
 
 
 def _resize_and_normalize_image(image: Image.Image, image_size: int, interpolation="bilinear") -> Tensor:
-    # The authors' LSTM-SSD TensorFlow feature extractor maps [0,255] -> [-1,1].
+    """Resize RGB to a square and map pixel intensities to [-1, 1]."""
     resized = TF.resize(image.convert("RGB"), [image_size, image_size], interpolation=TF.InterpolationMode(interpolation),
                         antialias=True)
     tensor = TF.pil_to_tensor(resized).to(dtype=torch.float32) / 255.0
@@ -66,7 +69,7 @@ def _resize_and_normalize_image(image: Image.Image, image_size: int, interpolati
 
 
 def resize_detection_views(image, image_size=320, interpolation="bilinear", paired=False):
-    """Resize each branch directly from one RGB image; never resize the big view again."""
+    """Resize directly from the RGB source to one view or 320/160 views, scaled to [-1, 1]."""
     image = image.convert("RGB")
     big = _resize_and_normalize_image(image, image_size, interpolation)
     if not paired:
@@ -77,14 +80,10 @@ def resize_detection_views(image, image_size=320, interpolation="bilinear", pair
 
 
 class EvalTransform:
-    """Deterministic LSTM-SSD preprocessing.
-
-    Images are warped to the fixed square resolution used by the paper's
-    alpha=1 experiment. Boxes are returned as normalized xyxy coordinates;
-    normalized coordinates remain valid under this fixed-shape warp.
-    """
+    """Resize full frames without augmentation and return normalized xyxy box targets."""
 
     def __init__(self, image_size: int = 320, interpolation="bilinear", paired=False) -> None:
+        """Configure output size, interpolation, and optional paired RGB views."""
         self.paired = paired
         self.interpolation = interpolation
         self.image_size = int(image_size)
@@ -94,6 +93,7 @@ class EvalTransform:
     def __call__(
         self, images: Sequence[Image.Image], targets: Sequence[Target]
     ) -> Tuple[Tensor, List[Target]]:
+        """Transform and stack a clip, recording its resized dimensions in each target."""
         if not images:
             raise ValueError("A clip must contain at least one image.")
         normalized_targets = _prepare_targets_normalized(images, targets)
@@ -104,15 +104,7 @@ class EvalTransform:
 
 
 class TrainTransform:
-    """SSD-style random crop + horizontal flip for a video clip.
-
-    The CVPR 2018 paper states that SSD data augmentation is used. This class
-    implements the standard SSD crop idea (sample an IoU-constrained patch)
-    and a 0.5 horizontal flip. One geometric transform is shared across all
-    frames of a clip so temporal correspondence is preserved. Sharing the
-    random parameters across time is an explicit PyTorch design choice; the
-    paper does not specify this detail.
-    """
+    """Apply a shared random crop and horizontal flip across a clip, then resize its views."""
 
     def __init__(
         self,
@@ -125,6 +117,7 @@ class TrainTransform:
         interpolation="bilinear",
         paired=False,
     ) -> None:
+        """Configure crop/flip sampling, interpolation, and output views; validate their bounds."""
         self.paired = paired
         self.interpolation = interpolation
         self.image_size = int(image_size)
@@ -141,6 +134,7 @@ class TrainTransform:
             raise ValueError("Invalid aspect_ratio_range.")
 
     def _sample_crop(self, targets: Sequence[Target]) -> Tuple[float, float, float, float] | None:
+        """Try an IoU-constrained normalized crop against clip boxes, or keep the full frame."""
         all_boxes = [t["boxes"] for t in targets if isinstance(t.get("boxes"), Tensor) and t["boxes"].numel()]
         if not all_boxes:
             return None
@@ -167,6 +161,7 @@ class TrainTransform:
     def _apply_crop_to_target(
         target: Target, crop: Tuple[float, float, float, float]
     ) -> Target:
+        """Keep boxes whose centers lie in the crop, align labels, and rescale clipped coordinates."""
         left, top, right, bottom = crop
         copied = deepcopy(target)
         boxes = copied["boxes"]
@@ -204,6 +199,7 @@ class TrainTransform:
 
     @staticmethod
     def _apply_flip_to_target(target: Target) -> Target:
+        """Copy a target and mirror its normalized boxes horizontally."""
         copied = deepcopy(target)
         boxes = copied["boxes"]
         assert isinstance(boxes, Tensor)
@@ -215,6 +211,7 @@ class TrainTransform:
         return copied
 
     def augment(self, images, targets):
+        """Apply shared crop/flip choices to PIL frames and return normalized, aligned targets."""
         if not images:
             raise ValueError("A clip must contain at least one image.")
         normalized_targets = _prepare_targets_normalized(images, targets)
@@ -255,6 +252,7 @@ class TrainTransform:
     def __call__(
         self, images: Sequence[Image.Image], targets: Sequence[Target]
     ) -> Tuple[Tensor, List[Target]]:
+        """Augment a clip, resize its views, and record the output size in each target."""
         working_images, working_targets = self.augment(images, targets)
         frames = stack_frames(
             [resize_detection_views(im, self.image_size, self.interpolation, self.paired) for im in working_images], dim=0
@@ -265,12 +263,15 @@ class TrainTransform:
 
 
 class ClassificationTransform:
+    """Preserve all image labels using full-frame resizing and optional training flips."""
     def __init__(self, backbone, training=True):
+        """Choose view/interpolation settings for the backbone and enable or disable training flips."""
         self.interpolation = 'bicubic' if backbone in ('timm_mobilenet_v2', 'tinynet_d', 'efficientnet_b0') else 'bilinear'
         self.paired = backbone in ('timm_mobilenet_v2', 'tinynet_d', 'efficientnet_b0')
         self.training = training
 
     def __call__(self, images, targets):
+        """Resize full RGB frames, optionally flip them, and leave image-level targets unchanged."""
         # Keep the full frame: crops could remove objects while retaining their image labels.
         views = []
         for image in images:

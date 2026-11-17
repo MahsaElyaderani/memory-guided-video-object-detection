@@ -54,7 +54,7 @@ def benchmark_backbones(model, steps, warmup):
 
 
 def load_evaluation_model(path):
-    from train_lstm_models import model_from_matched
+    from utils.lstm_checkpoints import model_from_matched
     payload = load_checkpoint(path)
     if payload.get('stage') != 'matched_detection':
         raise ValueError('Matched evaluation requires a matched detection checkpoint.')

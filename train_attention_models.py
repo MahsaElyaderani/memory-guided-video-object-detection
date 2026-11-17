@@ -20,7 +20,7 @@ from losses.multibox_loss import criterion_for
 from engine import trainer_attention as trainer
 # Preserve established imports while the implementations live in the engine.
 from datasets.dataset_imagenetvid import TrainingPairs
-from datasets.dataloader import collate_pairs
+from datasets.dataloader import collate_attention_clips
 from engine.trainer_attention import evaluate, export_attention_run
 
 

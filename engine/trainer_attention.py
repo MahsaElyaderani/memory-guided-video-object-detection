@@ -4,7 +4,7 @@ import torch
 from PIL import Image
 from torch import nn
 
-from datasets.dataloader import budget_loader, collate_pairs
+from datasets.dataloader import budget_loader, collate_attention_clips
 from datasets.dataset_imagenetvid import TrainingPairs
 from datasets.transforms import resize_detection_views
 from engine.evaluator import decode, export_attention_run
@@ -46,7 +46,7 @@ def train(student, teacher, pairs, selection, val, optimizer, scheduler, criteri
     while step < budget:
         epoch, offset = divmod(step, batches)
         count = min(batches-offset, validate_every-step % validate_every)
-        loader = budget_loader(pairs, loader_options, epoch+1, offset, count, collate_fn=collate_pairs)
+        loader = budget_loader(pairs, loader_options, epoch+1, offset, count, collate_fn=collate_attention_clips)
         loss_sum, updates = train_batches(student, teacher, loader, optimizer, scheduler, criterion,
                                           device=device, epoch=epoch+1)
         step += updates

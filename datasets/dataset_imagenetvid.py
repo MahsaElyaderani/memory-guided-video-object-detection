@@ -1,4 +1,4 @@
-"""ImageNet VID datasets: detection clips and multi-label classification frames."""
+"""ImageNet VID data for LSTM detection clips, classification frames, and attention keyframe/student windows."""
 from __future__ import annotations
 
 import json
@@ -34,6 +34,7 @@ class DetectionDataset(Dataset):
         clip_stride: int = 1,
         drop_incomplete: bool = True,
     ) -> None:
+        """Load annotations, map foreground labels, and index valid consecutive video clips."""
         super().__init__()
         self.annotation_file = Path(annotation_file)
         self.frames_root = Path(frames_root)
@@ -107,12 +108,15 @@ class DetectionDataset(Dataset):
 
     @property
     def num_classes(self) -> int:
+        """Count foreground categories, excluding the SSD background class."""
         return len(self.category_id_to_label)
 
     def __len__(self) -> int:
+        """Return the number of indexed clips, not the number of videos."""
         return len(self.clip_index)
 
     def _load_image_and_target(self, record: dict) -> Tuple[Image.Image, Target]:
+        """Load one RGB frame and valid boxes in absolute xyxy pixels with label/frame metadata."""
         image_path = self.frames_root / str(record["file_name"])
         if not image_path.is_file():
             raise FileNotFoundError(image_path)
@@ -142,6 +146,7 @@ class DetectionDataset(Dataset):
         return image, target
 
     def _records_to_clip(self, records: Sequence[dict]):
+        """Load the selected frames and apply the configured image/box transform."""
         images: List[Image.Image] = []
         targets: List[Target] = []
         for record in records:
@@ -151,6 +156,7 @@ class DetectionDataset(Dataset):
         return self.transform(images, targets)
 
     def __getitem__(self, index: int):
+        """Return a transformed clip; pad short videos only when drop_incomplete is false."""
         video_id, start = self.clip_index[index]
         records = self.images_by_video[video_id]
         selected = records[start:start + self.clip_length]
@@ -176,16 +182,20 @@ class DetectionDataset(Dataset):
 
 
 class ClassificationDataset(torch.utils.data.Dataset):
+    """Adapt single-frame detection samples into 30-class multi-label classification samples."""
     def __init__(self, detection_dataset, backbone, training=True):
+        """Require single-frame VID data and replace its transform with classification preprocessing."""
         if detection_dataset.clip_length != 1 or detection_dataset.num_classes != 30:
             raise ValueError('Classification requires single frames with all 30 VID categories.')
         self.detection_dataset = detection_dataset
         self.detection_dataset.transform = ClassificationTransform(backbone, training)
 
     def __len__(self):
+        """Return the number of indexed single-frame samples."""
         return len(self.detection_dataset)
 
     def __getitem__(self, index):
+        """Return one image view/container and a binary vector of classes present in that image."""
         frames, targets = self.detection_dataset[index]
         labels = targets[0]['labels'].long()
         if ((labels < 1) | (labels > 30)).any():
@@ -196,15 +206,19 @@ class ClassificationDataset(torch.utils.data.Dataset):
 
 
 class TrainingPairs(torch.utils.data.Dataset):
+    """Provide a teacher keyframe and sampled student frames from a 10-frame attention window."""
     def __init__(self, dataset, student_frames=6):
+        """Wrap indexed windows and configure shared augmentation for the sampled frames."""
         self.dataset = dataset
         self.student_frames = student_frames
         self.transform = TrainTransform(160, interpolation='bicubic')
 
     def __len__(self):
+        """Return the number of windows indexed by the wrapped dataset."""
         return len(self.dataset)
 
     def __getitem__(self, index):
+        """Return an augmented PIL keyframe, resized student tensors, and student-only box targets."""
         video, start = self.dataset.clip_index[index]
         records = self.dataset.images_by_video[video]
         # Retain the original RNG draw when resuming a one-frame checkpoint.

@@ -1,11 +1,8 @@
-import json
 import math
 from pathlib import Path
 
 import cv2
 import numpy as np
-
-from vid_categories import VID_CLASSES, vid_to_dataset_labels
 
 
 GT_COLOR = (60, 220, 60)
@@ -68,91 +65,6 @@ def render_frame(bgr, target, prediction, class_names, variant,
         canvas = predicted
     return cv2.copyMakeBorder(canvas, 0, canvas.shape[0] % 2, 0, canvas.shape[1] % 2,
                               cv2.BORDER_CONSTANT, value=(0, 0, 0))
-
-
-class VideoExporter:
-    def __init__(self, dataset, output_dir, variant, draw_score_threshold=0.3,
-                 layout='side-by-side', playback_fps=30.0, max_side=960,
-                 save_frames_every=0, class_names=None):
-        if not math.isfinite(playback_fps) or playback_fps <= 0 or save_frames_every < 0:
-            raise ValueError('playback_fps must be positive; save_frames_every must be non-negative.')
-        self.dataset, self.variant = dataset, variant
-        self.output_dir = Path(output_dir)
-        self.video_dir = self.output_dir / 'videos'
-        self.video_dir.mkdir()
-        self.frame_dir = self.output_dir / 'frames'
-        if save_frames_every:
-            self.frame_dir.mkdir()
-        self.records = {int(record['id']): record for video_id in dataset.video_ids
-                        for record in dataset.images_by_video[video_id]}
-        if class_names is None:
-            mapping = vid_to_dataset_labels(dataset)
-            self.class_names = {label: VID_CLASSES[fork_label - 1][0]
-                                for fork_label, label in mapping.items()}
-        else:
-            self.class_names = dict(class_names)
-        self.draw_threshold, self.layout = draw_score_threshold, layout
-        self.playback_fps, self.max_side = playback_fps, max_side
-        self.save_frames_every = save_frames_every
-        self.writer, self.video_id, self.shape = None, None, None
-        self.video_index = []
-        self.detection_stream = (self.output_dir / 'detections.jsonl').open('x')
-
-    def close_video(self):
-        if self.writer is not None:
-            self.writer.release()
-            self.writer = None
-
-    def close(self):
-        self.close_video()
-        self.detection_stream.close()
-
-    def __call__(self, video_id, target, prediction):
-        image_id = int(target['image_id'])
-        record = self.records[image_id]
-        bgr = cv2.imread(str(self.dataset.frames_root / record['file_name']))
-        if bgr is None:
-            raise ValueError(f'Could not decode image {record["file_name"]}')
-        canvas = render_frame(bgr, target, prediction, self.class_names, self.variant,
-                              self.draw_threshold, self.layout, self.max_side)
-        if video_id != self.video_id:
-            self.close_video()
-            self.video_id = video_id
-            self.shape = canvas.shape[:2]
-            filename = f'video_{video_id}_{self.variant}.mp4'
-            self.writer = cv2.VideoWriter(str(self.video_dir / filename),
-                                          cv2.VideoWriter_fourcc(*'mp4v'), self.playback_fps,
-                                          (canvas.shape[1], canvas.shape[0]))
-            if not self.writer.isOpened():
-                raise RuntimeError('OpenCV could not open the mp4v video writer. Check codec availability.')
-            self.video_index.append({'video_id': video_id, 'path': 'videos/' + filename,
-                                     'num_frames': 0, 'encoded_size': [canvas.shape[1], canvas.shape[0]],
-                                     'playback_fps': self.playback_fps, 'codec': 'mp4v'})
-        if canvas.shape[:2] != self.shape:
-            raise ValueError(f'Frame dimensions changed within video {video_id}.')
-        self.writer.write(canvas)
-        count = self.video_index[-1]['num_frames']
-        if self.save_frames_every and count % self.save_frames_every == 0:
-            filename = self.frame_dir / f'video_{video_id}_image_{image_id}.jpg'
-            if not cv2.imwrite(str(filename), canvas):
-                raise IOError(f'Could not save {filename}')
-        self.video_index[-1]['num_frames'] += 1
-        height, width = bgr.shape[:2]
-        entries = []
-        for box, label, score in zip(prediction['boxes'].tolist(), prediction['labels'].tolist(),
-                                     prediction['scores'].tolist()):
-            entries.append({'dataset_label': label, 'class_name': self.class_names[label],
-                            'score': score, 'box_xyxy_normalized': box,
-                            'box_xyxy_pixels': [box[0] * width, box[1] * height,
-                                                box[2] * width, box[3] * height]})
-        self.detection_stream.write(json.dumps({
-            'video_id': video_id, 'frame_id': int(target['frame_id']), 'image_id': image_id,
-            'file_name': record['file_name'], 'original_size': [width, height],
-            'predictions': entries,
-            'ground_truth': [{'dataset_label': label, 'class_name': self.class_names[label],
-                              'box_xyxy_normalized': box}
-                             for box, label in zip(target['boxes'].tolist(), target['labels'].tolist())],
-        }, allow_nan=False) + '\n')
 
 
 class DetectionVideoExporter:

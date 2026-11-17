@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-import time
 from typing import Dict, List, Sequence
 
 import torch
@@ -11,16 +10,14 @@ from torchvision.ops import nms
 from routing.predictions import detection
 
 try:
-    from utils.runtime import tqdm, LOSS_KEYS, loss_postfix
+    from utils.runtime import tqdm
 except ImportError:
-    from ..utils.runtime import tqdm, LOSS_KEYS, loss_postfix
+    from ..utils.runtime import tqdm
 
 try:
     from models.anchors import BoxCoderScales, decode_boxes
-    from models.lstm_ssd_detector import LSTMSSD
 except ImportError:
     from ..models.anchors import BoxCoderScales, decode_boxes
-    from ..models.lstm_ssd_detector import LSTMSSD
 
 
 def decode(output, model, threshold, maximum=100):
@@ -205,124 +202,3 @@ def compute_map50(
     map50 = float(sum(ap_per_class.values()) / len(ap_per_class)) if ap_per_class else 0.0
     return {"mAP@0.5": map50, "AP@0.5_per_class": ap_per_class, "evaluated_classes": len(ap_per_class),
             **class_coverage(gt_counts[1:])}
-
-
-@torch.no_grad()
-def evaluate_vid(
-    model: LSTMSSD,
-    dataset,
-    device: torch.device | str,
-    score_threshold: float = 0.0,
-    nms_iou_threshold: float = 0.5,
-    max_detections_per_class: int = 100,
-    max_total_detections: int = 100,
-    criterion=None,
-    progress: bool = True,
-    description: str = "Eval (current/mean)",
-    prediction_callback=None,
-    per_video_metrics: bool = False,
-) -> Dict[str, object]:
-    """Evaluate online: recurrent state persists within each video only."""
-    device = torch.device(device)
-    if not 0 <= score_threshold <= 1 or not 0 <= nms_iou_threshold <= 1:
-        raise ValueError('Score and NMS thresholds must be in [0,1].')
-    if min(max_detections_per_class, max_total_detections) < 1:
-        raise ValueError('Detection limits must be positive.')
-    model.to(device).eval()
-    predictions: List[Dict[str, Tensor]] = []
-    ground_truths: List[Dict[str, Tensor]] = []
-
-    totals = {key: 0.0 for key in LOSS_KEYS}
-    num_frames = sum(len(dataset.images_by_video[v]) for v in dataset.video_ids)
-    ranges, export_seconds = {}, 0.0
-    if device.type == 'cuda':
-        torch.cuda.synchronize(device)
-    started = time.perf_counter()
-    with tqdm(total=num_frames, desc=description, unit="frame",
-              disable=not progress, dynamic_ncols=True) as bar:
-        for video_id in dataset.video_ids:
-            begin = len(predictions)
-            state = None  # reset exactly at the video boundary
-            for frame, target in dataset.iter_video(video_id):
-                frame = frame.unsqueeze(0).to(device)
-                output, state = model.forward_step(frame, state=state, return_anchors=True)
-                if not all(torch.isfinite(output[key]).all() for key in ('class_logits', 'box_regression')):
-                    raise FloatingPointError('Non-finite detector outputs.')
-                if criterion is not None:
-                    loss_dict = criterion(output, [target])
-                    current = {key: float(loss_dict[key].item()) for key in LOSS_KEYS}
-                    for key in totals:
-                        totals[key] += current[key]
-                detections = postprocess_detections(
-                    output["class_logits"], output["box_regression"], output["anchors"],
-                    num_classes=model.model_cfg.num_classes,
-                    score_threshold=score_threshold,
-                    nms_iou_threshold=nms_iou_threshold,
-                    max_detections_per_class=max_detections_per_class,
-                    max_total_detections=max_total_detections,
-                )
-                predictions.append({
-                    "boxes": detections["boxes"].cpu(),
-                    "scores": detections["scores"].cpu(),
-                    "labels": detections["labels"].cpu(),
-                    "image_id": target["image_id"].cpu(),
-                })
-                ground_truths.append({
-                    "boxes": target["boxes"].cpu(),
-                    "labels": target["labels"].cpu(),
-                    "image_id": target["image_id"].cpu(),
-                })
-                if prediction_callback is not None:
-                    export_started = time.perf_counter()
-                    prediction_callback(video_id, target, predictions[-1])
-                    export_seconds += time.perf_counter() - export_started
-                bar.update(1)
-                if criterion is not None:
-                    bar.set_postfix(loss_postfix(current, totals, len(ground_truths)))
-            ranges[video_id] = (begin, len(predictions))
-    if device.type == 'cuda':
-        torch.cuda.synchronize(device)
-    elapsed_total = time.perf_counter() - started
-    elapsed = max(elapsed_total - export_seconds, 1e-12)
-    metrics = compute_map50(
-        predictions, ground_truths,
-        num_classes=model.model_cfg.num_classes,
-        iou_threshold=0.5, progress=progress,
-    )
-    metrics["num_frames"] = len(ground_truths)
-    count = model.model_cfg.num_classes
-    object_counts = {label: 0 for label in range(1, count + 1)}
-    frame_counts = {label: 0 for label in range(1, count + 1)}
-    for target in ground_truths:
-        labels = target['labels'].tolist()
-        for label in labels:
-            object_counts[label] += 1
-        for label in set(labels):
-            frame_counts[label] += 1
-    metrics.update({
-        'implementation': 'mobile_vod', 'num_videos': len(dataset.video_ids),
-        'video_ids': dataset.video_ids,
-        'frames_per_video': {v: len(dataset.images_by_video[v]) for v in dataset.video_ids},
-        'evaluated_image_ids': [int(target['image_id']) for target in ground_truths],
-        'score_threshold': score_threshold, 'nms_iou_threshold': nms_iou_threshold,
-        'max_detections_per_class': max_detections_per_class,
-        'max_total_detections': max_total_detections,
-        'class_names': getattr(dataset, 'label_to_name', {}),
-        'ground_truth_counts_per_class': object_counts,
-        'ground_truth_frames_per_class': frame_counts,
-        'inference_seconds': elapsed, 'FPS': len(predictions) / elapsed,
-        'export_seconds': export_seconds, 'inference_plus_export_seconds': elapsed_total,
-        'FPS_scope': 'image loading, preprocessing, transfer, inference, NMS, optional loss and progress; excludes AP and export callback',
-    })
-    if per_video_metrics:
-        metrics['per_video_metrics'] = []
-        for video_id, (begin, end) in ranges.items():
-            video = compute_map50(predictions[begin:end], ground_truths[begin:end], count)
-            video.update({'video_id': video_id, 'num_frames': end - begin})
-            metrics['per_video_metrics'].append(video)
-    if criterion is not None:
-        metrics.update({
-            f"mean_frame_{key}": value / max(len(ground_truths), 1)
-            for key, value in totals.items()
-        })
-    return metrics

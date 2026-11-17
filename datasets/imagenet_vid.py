@@ -1,4 +1,4 @@
-"""Reusable dataset loader for ImageNet VID annotations, frames, and consecutive video clips."""
+"""ImageNet VID datasets: detection clips and multi-label classification frames."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from PIL import Image
 
-from .transforms import EvalTransform, Target
+from .transforms import ClassificationTransform, EvalTransform, Target
 
 
 class ImageNetVIDDataset(Dataset):
@@ -172,3 +172,23 @@ class ImageNetVIDDataset(Dataset):
         for record in self.images_by_video[video_id]:
             frames, targets = self._records_to_clip([record])
             yield frames[0], targets[0]
+
+
+class VIDClassificationDataset(torch.utils.data.Dataset):
+    def __init__(self, detection_dataset, backbone, training=True):
+        if detection_dataset.clip_length != 1 or detection_dataset.num_classes != 30:
+            raise ValueError('Classification requires single frames with all 30 VID categories.')
+        self.detection_dataset = detection_dataset
+        self.detection_dataset.transform = ClassificationTransform(backbone, training)
+
+    def __len__(self):
+        return len(self.detection_dataset)
+
+    def __getitem__(self, index):
+        frames, targets = self.detection_dataset[index]
+        labels = targets[0]['labels'].long()
+        if ((labels < 1) | (labels > 30)).any():
+            raise ValueError('VID labels must be foreground indices 1..30.')
+        target = torch.zeros(30, dtype=torch.float32)
+        target[labels.unique() - 1] = 1.
+        return frames[0], target

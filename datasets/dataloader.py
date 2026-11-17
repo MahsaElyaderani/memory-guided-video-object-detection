@@ -16,6 +16,11 @@ def configure_worker_sharing(worker_id, strategy):
     torch.multiprocessing.set_sharing_strategy(strategy)
 
 
+def classification_collate(batch):
+    images, labels = zip(*batch)
+    return stack_frames(images), torch.stack(labels)
+
+
 def video_collate_fn(batch: Sequence[Tuple[Tensor, list[dict]]]):
     """Collate fixed-length video clips while preserving ragged GT boxes."""
     if not batch:
@@ -85,7 +90,6 @@ class SeededSamples(Dataset):
 
 def budget_loader(dataset, args, epoch, start_batch, batches, *, collate_fn=None):
     """Rebuild only the unconsumed slice of a deterministic epoch permutation."""
-    from .classification import classification_collate
     seed = args.seed + epoch
     generator = torch.Generator().manual_seed(seed)
     order = torch.randperm(len(dataset), generator=generator)

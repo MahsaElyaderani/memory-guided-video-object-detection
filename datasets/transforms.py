@@ -1,4 +1,4 @@
-"""Reusable image and box transforms for training augmentation and detection input resizing."""
+"""Shared image and box transforms for detection and classification."""
 from __future__ import annotations
 
 import random
@@ -262,3 +262,20 @@ class TrainTransform:
         for target in working_targets:
             target["size"] = torch.tensor([self.image_size, self.image_size], dtype=torch.long)
         return frames, working_targets
+
+
+class ClassificationTransform:
+    def __init__(self, backbone, training=True):
+        self.interpolation = 'bicubic' if backbone in ('timm_mobilenet_v2', 'tinynet_d', 'efficientnet_b0') else 'bilinear'
+        self.paired = backbone in ('timm_mobilenet_v2', 'tinynet_d', 'efficientnet_b0')
+        self.training = training
+
+    def __call__(self, images, targets):
+        # Keep the full frame: crops could remove objects while retaining their image labels.
+        views = []
+        for image in images:
+            image = image.convert('RGB')
+            if self.training and random.random() < .5:
+                image = TF.hflip(image)
+            views.append(resize_detection_views(image, 320, self.interpolation, self.paired))
+        return stack_frames(views), targets

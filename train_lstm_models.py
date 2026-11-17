@@ -8,7 +8,7 @@ import uuid
 
 import torch
 from torch import nn
-from datasets.classification import VIDClassificationDataset
+from datasets.imagenet_vid import VIDClassificationDataset
 from datasets.dataloader import budget_loader
 from engine.lstm_training import (add_training_arguments, build_training_data, make_loader,
                                    train_detector_epoch)

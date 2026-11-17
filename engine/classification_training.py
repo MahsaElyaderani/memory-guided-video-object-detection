@@ -2,7 +2,7 @@
 import torch
 from torch.utils.data import DataLoader
 
-from datasets.classification import classification_collate
+from datasets.dataloader import classification_collate
 from engine.evaluator import classification_metrics
 from utils.runtime import tqdm
 

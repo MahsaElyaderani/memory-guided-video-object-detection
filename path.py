@@ -42,15 +42,6 @@ TASK_PATHS = {
     "sample_vid_videos": dict(output=None),
 }
 
-# Existing shell experiment selections; change these here when selecting another run.
-EVALUATION_BIG = None  # Set a supported native V2 stage-2 checkpoint for run_evaluation.sh.
-EVALUATION_SMALL = None
-EVALUATION_JOINT = None
-PREJOINT_PAIR_DIR = None
-PREJOINT_BIG = None
-PREJOINT_OUTPUT = None  # Must be a fresh directory; original overwrite protection applies.
-RESUME_JOINT = None
-
 
 def resolve_path(value):
     """Normalize configured paths only; never resolve symlinks or touch the filesystem."""

@@ -24,7 +24,7 @@ from routing.data import data_signature, guard_held_out
 from engine.classification_training import classification_epoch
 from utils.checkpoints import capture_rng, restore_rng
 from utils.joint_initialization import make_joint_config
-from utils.lstm_checkpoints import paired_metadata
+from utils.lstm_checkpoints import lstm_metadata
 from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint
 from routing.predictions import sha256_file
 from utils.resume import resume_defaults, saved_arguments, restore_optimizer
@@ -101,7 +101,7 @@ def model_from_matched(payload):
         raise ValueError('Incompatible classification architecture metadata.')
     model = build_model(payload['experiment'], task, payload['initialization_seed'],
                         standalone_backbone_only=architecture == 'backbone_only')
-    expected = paired_metadata(model)
+    expected = lstm_metadata(model)
     if any(payload.get(key) != value for key, value in expected.items()):
         raise ValueError('Matched architecture/configuration differs.')
     if payload.get('protocol') != {'bn_stats': 'frozen', 'standalone_memory': 'update', 'joint_memory': 'big_only'}:
@@ -377,7 +377,7 @@ def train(args):
         if validate:
             history.append({'epoch': epoch, 'train': stats, 'validation': metrics,
                             **({'update': budget['updates']} if budget else {})})
-        payload = {**paired_metadata(model), 'matched_format_version': 1, 'stage': 'matched_' + args.task,
+        payload = {**lstm_metadata(model), 'matched_format_version': 1, 'stage': 'matched_' + args.task,
                    'experiment': args.experiment, 'initialization_seed': args.seed,
                    'protocol': {'bn_stats': 'frozen', 'standalone_memory': 'update', 'joint_memory': 'big_only'},
                    'class_to_idx': {str(i): i - 1 for i in range(1, 31)},

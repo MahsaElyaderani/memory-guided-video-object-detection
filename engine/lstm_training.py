@@ -19,7 +19,7 @@ from paired_config import MemoryCorruption, PairedConfig, PolicyConfig
 from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
 from routing.backbone_schedule import random_training_schedule, validate_random_training_resume
 from utils.checkpoints import capture_rng, restore_rng
-from utils.lstm_checkpoints import paired_metadata, initialize_pair, load_pair, finish_validation
+from utils.lstm_checkpoints import lstm_metadata, initialize_joint_detector, load_joint_detector, finish_validation
 from utils.runtime import save_training_payload, run_lock, LOSS_KEYS, load_checkpoint, loss_postfix, tqdm
 
 
@@ -215,7 +215,7 @@ def train_pair(args):
     if not resume and (destination.exists() or best.exists() or list(destination.parent.glob(destination.stem + "_epoch_*"))):
         raise FileExistsError("Use a new checkpoint destination or --resume.")
     if resume:
-        model, payload = load_pair(args.resume, stage)
+        model, payload = load_joint_detector(args.resume, stage)
         metadata, sources = payload, payload["sources"]
         if args.backbone is not None and args.backbone != model.model_cfg.backbone:
             raise ValueError('Backbone family changed on resume.')
@@ -247,7 +247,7 @@ def train_pair(args):
         fresh_config = (make_joint_config(args.backbone or 'timm_mobilenet_v2',
                                           1. if args.big_width_mult is None else args.big_width_mult)
                         if args.init_source == 'fresh' else None)
-        model, metadata, sources = initialize_pair(args.big_checkpoint, cfg, args.fast_init, args.fast_checkpoint,
+        model, metadata, sources = initialize_joint_detector(args.big_checkpoint, cfg, args.fast_init, args.fast_checkpoint,
                                                    init_source=args.init_source, model_config=fresh_config,
                                                    backbone_weights=args.backbone_weights, random_backbones=args.random_backbones)
         if args.reset_fast_bn:
@@ -267,7 +267,7 @@ def train_pair(args):
                   "arguments": {key: value for key, value in vars(args).items()
                                 if key not in ("epochs", "resume", "checkpoint_out", "no_progress", "big_checkpoint",
                                                "fast_checkpoint", "backbone_weights", "sharing_strategy", "log_every", "init_source")},
-                  "model": paired_metadata(model), "sources": sources}
+                  "model": lstm_metadata(model), "sources": sources}
     definition["random_schedule_version"] = 3
     # Preserve the checkpoint schema used by existing runs.
     definition["arguments"]["validation_interval"] = definition["arguments"].pop("big_call_interval")
@@ -334,7 +334,7 @@ def train_pair(args):
         loader = make_loader(train, args)
         stats = train_detector_epoch(model, loader, optimizer, criterion, args, epoch)
         history.append({"epoch": epoch, **stats})
-        payload = {**paired_metadata(model), "stage": stage, "model": model.state_dict(),
+        payload = {**lstm_metadata(model), "stage": stage, "model": model.state_dict(),
                    "epoch": epoch, "optimizer": optimizer.state_dict(), "rng_state": capture_rng(),
                    "category_id_to_label": train.category_id_to_label, "label_to_name": train.label_to_name,
                    "sources": sources, "training_signatures": signatures, "run_definition": definition,

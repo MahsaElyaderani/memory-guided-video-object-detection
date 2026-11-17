@@ -40,7 +40,7 @@ def detector_fingerprint(model):
     return digest.hexdigest()
 
 
-def paired_metadata(model):
+def lstm_metadata(model):
     return {"paired_format_version": PAIRED_FORMAT_VERSION,
             "model_config": model_config_dict(model.model_cfg), "ssd_config": asdict(model.ssd_cfg),
             "paired_config": paired_config_dict(model)}
@@ -60,7 +60,7 @@ def paired_from_payload(payload, expected_stage=None):
     return model
 
 
-def initialize_pair(big_path, config, fast_init="timm", fast_path=None,
+def initialize_joint_detector(big_path, config, fast_init="timm", fast_path=None,
                     init_source="standalone_detection", model_config=None,
                     backbone_weights=None, random_backbones=False):
     if init_source == "joint_pretrain":
@@ -132,7 +132,7 @@ def initialize_pair(big_path, config, fast_init="timm", fast_path=None,
     return model, payload, source
 
 
-def load_pair(path, expected_stage=None):
+def load_joint_detector(path, expected_stage=None):
     payload = load_checkpoint(path)
     return paired_from_payload(payload, expected_stage), payload
 
@@ -157,3 +157,9 @@ def finish_validation(payload, metrics, destination):
         atomic_save_checkpoint(payload, best_path)
     save_training_payload(payload, destination)
     return payload
+
+
+# Preserve existing imports; serialized checkpoint keys remain unchanged.
+paired_metadata = lstm_metadata
+initialize_pair = initialize_joint_detector
+load_pair = load_joint_detector

@@ -21,7 +21,7 @@ from engine import trainer_attention as trainer
 # Preserve established imports while the implementations live in the engine.
 from datasets.dataset_imagenetvid import TrainingPairs
 from datasets.dataloader import collate_pairs
-from engine.trainer_attention import evaluate, export_evaluation
+from engine.trainer_attention import evaluate, export_attention_run
 
 
 def run(args):
@@ -54,7 +54,7 @@ def run(args):
         student.load_state_dict(saved['model'], strict=True)
     if args.action == 'eval':
         if args.output_dir:
-            metrics = trainer.export_evaluation(student, teacher, selection, val, args.device, args.output_dir, args.visuals)
+            metrics = trainer.export_attention_run(student, teacher, selection, val, args.device, args.output_dir, args.visuals)
             write_json(dict(checkpoint=str(args.checkpoint.resolve()), updates=saved['updates'], run_id=saved['run_id'],
                             teacher_sha256=teacher_hash, manifest_sha256=manifest_hash), args.output_dir/'evaluation_source.json')
         else:

@@ -20,7 +20,7 @@ from routing.predictions import filtered
 from utils.lstm_checkpoints import detector_fingerprint, lstm_metadata
 from utils.checkpoints import capture_rng, restore_rng
 from utils.resume import saved_arguments
-from engine.classification_training import classification_epoch
+from engine.trainer_classification import classification_epoch
 from utils.runtime import (tqdm, LOSS_KEYS, loss_postfix, early_stopping_reached,
                            seed_training, save_matched_checkpoints)
 from datasets.dataloader import budget_loader

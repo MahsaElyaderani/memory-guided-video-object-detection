@@ -206,6 +206,12 @@ def compute_map50(
 
 def export_lstm_run(model, dataset, policy, options, output_dir,
                       precision_ids=None, visual_options=None):
+    """Evaluate a standalone or joint LSTM detector using the supplied backbone policy.
+
+    Create a new output directory with per-frame predictions, a separate routing
+    log, metrics, and run status. Optionally render detection videos and frames.
+    Return the metrics; existing output directories are never overwritten.
+    """
     import json
     from pathlib import Path
     from engine.trainer_lstm import evaluate
@@ -241,7 +247,14 @@ def export_lstm_run(model, dataset, policy, options, output_dir,
         raise
 
 
-def export_evaluation(student, teacher, selection, dataset, device, output, visuals=False):
+def export_attention_run(student, teacher, selection, dataset, device, output, visuals=False):
+    """Evaluate a no-memory or attention-memory student with frozen teacher keyframes.
+
+    Use the selected validation frames and the evaluator's 10-frame schedule.
+    Save the selection, predictions with teacher/student routing, student-only
+    and full-sequence metrics, and run status in a new output directory.
+    Optionally render videos and frames. Return metrics without changing weights.
+    """
     from collections import Counter
     import json
     from engine.trainer_attention import evaluate

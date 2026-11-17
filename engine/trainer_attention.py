@@ -7,7 +7,7 @@ from torch import nn
 from datasets.dataloader import budget_loader, collate_pairs
 from datasets.dataset_imagenetvid import TrainingPairs
 from datasets.transforms import resize_detection_views
-from engine.evaluator import decode, export_evaluation
+from engine.evaluator import decode, export_attention_run
 from scripts.compare_vid import score_predictions
 from utils.checkpoints import capture_rng
 from utils.runtime import tqdm, early_stopping_reached, ATTENTION_MEMORY_NAMES, save_matched_checkpoints

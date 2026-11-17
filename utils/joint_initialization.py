@@ -1,6 +1,6 @@
 """Shared initialization utilities for backbone weights and classification-to-detection transfer."""
 from config import ModelConfig, checkpoint_model_config
-from paired_config import PairedConfig
+from lstm_config import PairedConfig
 from models.classification_pretraining import JointClassifier
 from utils.runtime import load_checkpoint
 

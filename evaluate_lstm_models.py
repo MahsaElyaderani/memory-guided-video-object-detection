@@ -10,7 +10,7 @@ import time
 import torch
 
 from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames
-from paired_config import PolicyConfig, MemoryCorruption, PairedConfig
+from lstm_config import PolicyConfig, MemoryCorruption, PairedConfig
 from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
 from utils.lstm_checkpoints import paired_from_payload
 from utils.runtime import write_json, load_checkpoint

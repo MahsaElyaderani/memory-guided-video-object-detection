@@ -30,7 +30,7 @@ from path import VAL_ANNOTATIONS, VAL_FRAMES
 from engine.evaluator import compute_map50
 from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames, refresh_records
 from evaluate_lstm_models import load_evaluation_model
-from paired_config import PolicyConfig
+from lstm_config import PolicyConfig
 from routing.data import selected_dataset, validate_native_categories, guard_held_out
 from routing.predictions import sha256_file
 from utils.evaluation_data import normalized_target, raw_detection_row

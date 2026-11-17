@@ -18,7 +18,7 @@ from models.classification_pretraining import JointClassifier
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector
 from models.ssd_head import SSDFeatureMaps, SSDBoxPredictor
-from paired_config import PairedConfig, PolicyConfig
+from lstm_config import PairedConfig, PolicyConfig
 from path import parse_paths, RUNS_DIR
 from routing.data import data_signature, guard_held_out
 from engine.classification_training import classification_epoch

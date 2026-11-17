@@ -13,7 +13,7 @@ from engine.evaluator import compute_map50, postprocess_detections, decode
 from losses.multibox_loss import criterion_for
 from models.joint_lstm_detector import corrupt_memory
 from datasets.frame_views import PairedFrames
-from paired_config import MemoryCorruption, probability
+from lstm_config import MemoryCorruption, probability
 from utils.compute import profile_conv_linear, synchronize
 from routing.data import data_signature
 from utils.evaluation_data import load_frame, normalized_target, raw_detection_row

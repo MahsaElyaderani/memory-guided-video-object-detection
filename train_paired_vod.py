@@ -3,7 +3,7 @@ from path import parse_paths
 from utils.resume import resume_defaults
 import argparse
 from engine.lstm_training import add_training_arguments, locked_training
-from paired_config import MemoryCorruption
+from lstm_config import MemoryCorruption
 
 
 def parse_args(argv=None, *, resume_payload=None):

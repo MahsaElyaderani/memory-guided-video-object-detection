@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
-from paired_config import PolicyConfig
+from lstm_config import PolicyConfig
 from datasets.frame_views import big_frames
 
 

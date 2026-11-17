@@ -9,7 +9,7 @@ import torch
 from config import ModelConfig, SSDConfig, model_config_dict, checkpoint_model_config
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector
-from paired_config import PairedConfig
+from lstm_config import PairedConfig
 from routing.predictions import sha256_file
 from utils.checkpoints import model_from_checkpoint
 # Re-export shared helpers so existing checkpoint imports remain valid.

@@ -1,14 +1,11 @@
-"""Reusable LSTM checkpoint utilities for loading, metadata, and fingerprints."""
+"""Reusable LSTM checkpoint utilities for metadata and fingerprints."""
 from dataclasses import asdict
 import hashlib
 import json
 
 import torch
 
-from config import SSDConfig, model_config_dict, checkpoint_model_config
-from models.lstm_ssd_detector import LSTMSSD
-from models.joint_lstm_detector import JointLSTMDetector
-from lstm_config import PairedConfig
+from config import model_config_dict
 
 
 PAIRED_FORMAT_VERSION = 1
@@ -38,17 +35,3 @@ def lstm_metadata(model):
     return {"paired_format_version": PAIRED_FORMAT_VERSION,
             "model_config": model_config_dict(model.model_cfg), "ssd_config": asdict(model.ssd_cfg),
             "paired_config": paired_config_dict(model)}
-
-
-def paired_from_payload(payload, expected_stage=None):
-    if payload.get("paired_format_version") != PAIRED_FORMAT_VERSION:
-        raise ValueError("Not a supported paired-model checkpoint.")
-    if payload.get("stage") != "detector":
-        raise ValueError("Unknown paired checkpoint stage.")
-    if expected_stage is not None and payload["stage"] != expected_stage:
-        raise ValueError(f"Expected paired {expected_stage} checkpoint.")
-    model = JointLSTMDetector(LSTMSSD(checkpoint_model_config(payload["model_config"]),
-                             SSDConfig(**payload["ssd_config"])),
-                      PairedConfig(**payload["paired_config"]))
-    model.load_state_dict(payload["model"], strict=True)
-    return model

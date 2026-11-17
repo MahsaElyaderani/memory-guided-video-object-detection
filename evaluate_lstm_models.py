@@ -11,7 +11,6 @@ import torch
 from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames
 from lstm_config import PolicyConfig, MemoryCorruption
 from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
-from utils.lstm_checkpoints import paired_from_payload
 from utils.runtime import write_json, load_checkpoint
 from routing.predictions import sha256_file
 from utils.compute import synchronize
@@ -55,13 +54,11 @@ def benchmark_backbones(model, steps, warmup):
 
 
 def load_evaluation_model(path):
+    from train_lstm_models import model_from_matched
     payload = load_checkpoint(path)
-    if 'matched_format_version' in payload:
-        from train_lstm_models import model_from_matched
-        if payload.get('stage') != 'matched_detection':
-            raise ValueError('Matched evaluation requires a matched detection checkpoint.')
-        return model_from_matched(payload), payload
-    return paired_from_payload(payload, "detector"), payload
+    if payload.get('stage') != 'matched_detection':
+        raise ValueError('Matched evaluation requires a matched detection checkpoint.')
+    return model_from_matched(payload), payload
 
 
 def parse_args(argv=None):

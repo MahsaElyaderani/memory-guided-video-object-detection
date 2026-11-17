@@ -35,10 +35,8 @@ TRAIN_VALIDATION_FRAMES = VAL_FRAMES
 # Keys are existing CLI option names with '-' replaced by '_'.
 TASK_PATHS = {
     "train_matched": dict(checkpoint_out=None, init_checkpoint=None, resume=None, video_ids=None, val_video_ids=None),
-    "evaluate": dict(checkpoint=None),
     "evaluate_paired_vod": dict(checkpoint=None,
                                output_dir=None, video_ids=None, precision_image_ids=None),
-    "visualize_mobile_vod": dict(checkpoint=None, output_dir=None),
     "compare_paired_runs": dict(runs=None, output_dir=None),  # runs: list of paths
     "compare_visual_runs": dict(run_a=None, run_b=None, output_dir=None),
     "sample_vid_videos": dict(output=None),
@@ -72,7 +70,7 @@ def task_paths(task):
         values.update(annotations=TRAIN_ANNOTATIONS, frames_root=TRAIN_FRAMES,
                       val_annotations=TRAIN_VALIDATION_ANNOTATIONS,
                       val_frames_root=TRAIN_VALIDATION_FRAMES)
-    elif task in ("evaluate", "evaluate_paired_vod", "visualize_mobile_vod", "sample_vid_videos"):
+    elif task in ("evaluate_paired_vod", "sample_vid_videos"):
         values.update(annotations=VAL_ANNOTATIONS, frames_root=VAL_FRAMES)
     elif task in ("compare_paired_runs", "compare_visual_runs"):
         values.update(frames_root=VAL_FRAMES)

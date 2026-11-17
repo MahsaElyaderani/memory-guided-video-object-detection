@@ -3,19 +3,16 @@ from pathlib import Path
 
 from path import parse_paths
 import argparse
-from dataclasses import asdict
 import json
 import time
 
 import torch
 
 from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames
-from lstm_config import PolicyConfig, MemoryCorruption, PairedConfig
+from lstm_config import PolicyConfig, MemoryCorruption
 from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
 from utils.lstm_checkpoints import paired_from_payload
 from utils.runtime import write_json, load_checkpoint
-from utils.checkpoints import model_from_checkpoint
-from models.joint_lstm_detector import JointLSTMDetector
 from routing.predictions import sha256_file
 from utils.compute import synchronize
 
@@ -57,38 +54,20 @@ def benchmark_backbones(model, steps, warmup):
     return results
 
 
-def load_evaluation_model(path, native_big=False):
+def load_evaluation_model(path):
     payload = load_checkpoint(path)
     if 'matched_format_version' in payload:
         from train_lstm_models import model_from_matched
-        if native_big or payload.get('stage') != 'matched_detection':
-            raise ValueError('Matched evaluation requires a matched detection checkpoint, without --native-big.')
+        if payload.get('stage') != 'matched_detection':
+            raise ValueError('Matched evaluation requires a matched detection checkpoint.')
         return model_from_matched(payload), payload
-    if not native_big:
-        return paired_from_payload(payload, "detector"), payload
-    if payload.get("stage") != "stage2" or payload.get("validation_pending"):
-        raise ValueError("Native big evaluation requires a completed stage-2 checkpoint.")
-    big = model_from_checkpoint(payload)
-    # Reuse exactly the same decoding, AP, timing and export path. The unused
-    # fast branch is deterministic and cannot change native big predictions.
-    with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(0)
-        model = JointLSTMDetector(big)
-    signature = payload.get("training_signature")
-    if signature is None:
-        raise ValueError("Native checkpoint lacks its training signature.")
-    metadata = {**payload, "training_signatures": [{
-        "annotations_sha256": signature["annotation_sha256"],
-        "video_ids": signature["train_video_ids"]}]}
-    return model, metadata
+    return paired_from_payload(payload, "detector"), payload
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Evaluate the shared-memory VID pair: small, big or fixed.")
     add_data_arguments(parser)
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--native-big", action="store_true",
-                        help="Evaluate a native stage-2 checkpoint through the matched big-only pipeline.")
     parser.add_argument("--mode", choices=("all", "small", "big", "fixed"), default="all")
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument("--scene-change-threshold", type=float)
@@ -117,14 +96,12 @@ def parse_args(argv=None):
     args = parse_paths(parser, "evaluate_paired_vod", argv)
     if args.backbone_benchmark_steps < 0 or (args.backbone_benchmark_steps and args.warmup_frames < 1):
         parser.error('Backbone benchmark requires nonnegative steps and positive warmup frames.')
-    if args.native_big and (args.mode != "big" or args.memory_feedback != "clean"):
-        parser.error("--native-big requires --mode big, clean memory")
     return args
 
 
 def main(argv=None):
     args = parse_args(argv)
-    model, payload = load_evaluation_model(args.checkpoint, args.native_big)
+    model, payload = load_evaluation_model(args.checkpoint)
     if getattr(model, 'standalone', None) and args.mode != 'big':
         raise ValueError('Matched standalone evaluation uses --mode big (the sole backbone, including standalone small).')
     if payload.get("validation_pending"):
@@ -159,7 +136,7 @@ def main(argv=None):
     provenance = {"checkpoint": str(Path(args.checkpoint).resolve()),
                   "checkpoint_sha256": sha256_file(args.checkpoint), "epoch": payload.get("epoch"),
                   "global_step": payload.get("global_step"), "budget": payload.get("budget"),
-                  "native_big": args.native_big, "arguments": vars(args)}
+                  "arguments": vars(args)}
     write_json(provenance, output / "evaluation_source.json")
     results = {}
     try:
@@ -169,11 +146,6 @@ def main(argv=None):
                                               policy, options, output / name, corruption,
                                               precision_ids if mode == "fixed" else None, visuals)
             results[name]["evaluation_source"] = provenance
-            if args.native_big:
-                results[name]["native_detector_parameters"] = sum(p.numel() for p in model.big.parameters())
-                results[name]["evaluation_wrapper_note"] = (
-                    "Unused fast branch exists only for evaluator compatibility; total_detector includes it. "
-                    "Use native_detector_parameters for native model size. Timed detections execute big only.")
             write_json(results[name], output / name / "metrics.json")
         write_json({"results": {name: {key: metrics[key] for key in
                     ("mAP@0.5", "FPS", "conv_linear_FLOPs_per_frame", "big_call_frequency", "num_frames",

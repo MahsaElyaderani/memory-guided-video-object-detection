@@ -1,6 +1,7 @@
+"""Model and SSD architecture settings; training options live in the entry points and launchers."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Tuple
 
 
@@ -94,28 +95,6 @@ class SSDConfig:
         )
         other = len(self.aspect_ratios) + int(self.interpolated_scale_aspect_ratio > 0)
         return (first,) + (other,) * (self.num_levels - 1)
-
-
-@dataclass(frozen=True)
-class TrainConfig:
-    """Paper training settings for the alpha=1 experiment."""
-
-    learning_rate: float = 0.003
-    optimizer: str = "rmsprop"
-    sequence_length: int = 10
-    max_negatives_per_positive: int = 10
-    negative_loss_weight: float = 0.3
-
-    # RMSProp details from the authors' released configuration, not the paper.
-    rmsprop_momentum: float = 0.9
-    rmsprop_alpha: float = 0.9
-    rmsprop_eps: float = 1.0
-
-    def __post_init__(self) -> None:
-        if self.optimizer.lower() != "rmsprop":
-            raise ValueError("The paper's alpha=1 experiment uses RMSProp.")
-        if self.sequence_length != 10:
-            raise ValueError("The paper trains by unrolling 10-frame sequences.")
 
 
 def model_config_dict(config):

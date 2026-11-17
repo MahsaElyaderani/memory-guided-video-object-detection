@@ -13,7 +13,7 @@ python - "$ROOT" <<'PY' | tee "$RUNS/training_history.txt"
 import sys
 import math
 from pathlib import Path
-from utils.runtime import load_checkpoint
+from utils.runtime import load_checkpoint, ATTENTION_MEMORY_NAMES
 
 def show_history(checkpoint_path):
     checkpoint = load_checkpoint(checkpoint_path)
@@ -25,7 +25,7 @@ def show_history(checkpoint_path):
     budget = checkpoint.get("budget", {})
     model = checkpoint.get("experiment", "?")
     if stage == "p4_student_v1":
-        task, model = "detection", f"TinyNet-D (memory={checkpoint['memory']})"
+        task, model = "detection", f"TinyNet-D ({ATTENTION_MEMORY_NAMES[checkpoint['memory']]})"
         budget = dict(updates=checkpoint["updates"], total_updates=checkpoint["scheduler"]["T_max"])
     print(f"\n{'=' * 65}\n{model}: {task}")
     print(f"Checkpoint: {checkpoint_path}")

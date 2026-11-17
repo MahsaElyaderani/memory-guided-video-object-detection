@@ -26,7 +26,7 @@ from routing.predictions import sha256_file
 from scripts.compare_vid import load_manifest, score_predictions
 from train_lstm_models import save_matched_checkpoints, seed_training
 from utils.checkpoints import capture_rng, restore_rng
-from utils.runtime import run_lock, load_checkpoint, tqdm, write_json, early_stopping_reached
+from utils.runtime import run_lock, load_checkpoint, tqdm, write_json, early_stopping_reached, ATTENTION_MEMORY_NAMES
 from vid_categories import vid_to_dataset_labels
 
 
@@ -98,7 +98,7 @@ def export_evaluation(student, teacher, selection, dataset, device, output, visu
     exporter = None
     try:
         if visuals:
-            exporter = DetectionVideoExporter(dataset, output, student.memory, save_frames_every=1)
+            exporter = DetectionVideoExporter(dataset, output, ATTENTION_MEMORY_NAMES[student.memory], save_frames_every=1)
         write_json(selection, output/'selection.json')
         with (output/'detections.jsonl').open('x') as stream:
             def save(frame, rows, step):
@@ -113,7 +113,7 @@ def export_evaluation(student, teacher, selection, dataset, device, output, visu
                             scores=torch.tensor([r['score'] for r in rows], dtype=torch.float64))
                 record = dataset.routing_records[frame['image_id']]
                 target = normalized_target(dataset, record)
-                route = dict(selected_model='teacher' if step % 10 == 0 else 'student_' + student.memory,
+                route = dict(selected_model='teacher' if step % 10 == 0 else 'student_' + ATTENTION_MEMORY_NAMES[student.memory],
                              previous_contribution_age=step % 10)
                 row = raw_detection_row(record, target, pred, dataset.label_to_name)
                 row.update(route=route, coco_predictions=rows)
@@ -227,7 +227,7 @@ def run(args):
             if isinstance(module, nn.modules.batchnorm._BatchNorm):
                 module.eval()
         loss_sum = 0.
-        for keys, current, targets in tqdm(loader, desc=f'{args.memory} epoch {epoch+1}'):
+        for keys, current, targets in tqdm(loader, desc=f'{ATTENTION_MEMORY_NAMES[args.memory]} epoch {epoch+1}'):
             cache = teacher.keyframe(keys)[0] if args.memory == 'p4' else None
             optimizer.zero_grad(set_to_none=True)
             loss = criterion(student(current.to(args.device), cache), targets)['total_loss']
@@ -263,7 +263,8 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('train', 'eval'))
-    parser.add_argument('--memory', required=True, choices=('none', 'p4'))
+    parser.add_argument('--memory', required=True, choices=(*ATTENTION_MEMORY_NAMES.values(), *ATTENTION_MEMORY_NAMES),
+                        help='no_memory or attention_memory; old none/p4 names are also accepted')
     parser.add_argument('--checkpoint', type=Path, help='Latest checkpoint for resume, or latest/best for evaluation')
     parser.add_argument('--run-dir', type=Path)
     parser.add_argument('--output-dir', type=Path, help='Fresh evaluation folder for predictions and metrics')
@@ -287,13 +288,19 @@ def main():
     parser.add_argument('--seed', type=int)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
+    args.memory = {v: k for k, v in ATTENTION_MEMORY_NAMES.items()}.get(args.memory, args.memory)
     if (args.output_dir or args.visuals) and args.action != 'eval':
         parser.error('Exports are evaluation-only.')
     if args.visuals and not args.output_dir:
         parser.error('--visuals requires --output-dir.')
     if args.action == 'eval' and not args.checkpoint:
         parser.error('Evaluation requires --checkpoint.')
-    args.run_dir = args.run_dir or path.RUNS_DIR / 'p4_student_imagenet_no_projection' / args.memory
+    if args.run_dir is None:
+        root = path.RUNS_DIR / 'p4_student_imagenet_no_projection'
+        args.run_dir = root / ATTENTION_MEMORY_NAMES[args.memory]
+        # Resume older server folders until they are renamed; never silently restart.
+        if not args.run_dir.exists() and (root / args.memory).exists():
+            args.run_dir = root / args.memory
     args.task, args.prefetch_factor, args.sharing_strategy = 'detection', 1, None
     if args.action == 'train':
         with run_lock(args.run_dir/'detection.pt'):

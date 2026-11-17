@@ -14,6 +14,9 @@ import torch
 from tqdm.auto import tqdm
 
 
+# Public experiment names; serialized memory values stay unchanged.
+ATTENTION_MEMORY_NAMES = {"none": "no_memory", "p4": "attention_memory"}
+
 LOSS_KEYS = ("total_loss", "classification_loss", "localization_loss")
 
 

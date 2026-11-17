@@ -40,11 +40,12 @@ OmegaConf, and pycocotools are also required.
 
 Resume uses latest checkpoints; keep the saved training settings unchanged.
 LSTM launchers print the selected run folders; `RUN_NAME` selects an explicit run.
-Attention runs are stored under `RUNS_DIR/p4_student_imagenet_no_projection/{none,p4}`.
+Attention runs are stored under `RUNS_DIR/p4_student_imagenet_no_projection/{no_memory,attention_memory}`.
 The launcher accepts only `train`, `eval`, or `all`; both variants use the same
 projection-free architecture and resume their own latest checkpoints. Both require
 the frozen teacher weights. Training and evaluation no longer need initialization
-or projection flags.
+or projection flags. Checkpoints retain the internal memory values `none` and `p4`;
+direct commands accept both the descriptive names and those existing values.
 [show_train_history.sh](launchers/show_train_history.sh) reports saved training and
 validation history, best scores, learning rates, and remaining updates.
 
@@ -83,7 +84,7 @@ compare FPS using the same device and hardware.
 
 Both launchers save evaluation results in a new directory under `RESULTS_DIR`.
 Attention exports include metrics, per-frame predictions, and ground-truth/prediction
-videos for both `none` and `p4`, with teacher keyframes labeled. The saved predictions
+videos for both `no_memory` and `attention_memory`, with teacher keyframes labeled. The saved predictions
 can also be compared side by side using `evaluate.compare_detection_runs`, without
 rerunning inference. Full-validation evaluation is not exposed by these
 launchers; attention evaluation additionally enforces its saved manifest.

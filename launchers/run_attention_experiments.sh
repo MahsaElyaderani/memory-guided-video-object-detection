@@ -23,9 +23,19 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 RUNS="$(python path.py --get RUNS_DIR)"
 ROOT="$RUNS/p4_student_imagenet_no_projection"
 
+experiment_dir() {
+  local name="$1" old=none
+  [[ "$name" != attention_memory ]] || old=p4
+  if [[ ! -d "$ROOT/$name" && -d "$ROOT/$old" ]]; then
+    printf '%s\n' "$ROOT/$old"
+  else
+    printf '%s\n' "$ROOT/$name"
+  fi
+}
+
 if [[ "$ACTION" != eval ]]; then
-  for MODE in none p4; do
-    DIR="$ROOT/$MODE"
+  for MODE in no_memory attention_memory; do
+    DIR="$(experiment_dir "$MODE")"
     SOURCE=()
     if [[ -f "$DIR/detection.pt" ]]; then
       SOURCE=(--checkpoint "$DIR/detection.pt")
@@ -40,8 +50,8 @@ if [[ "$ACTION" != train ]]; then
   RESULTS="$(python path.py --get RESULTS_DIR)"
   mkdir -p "$RESULTS"
   OUT="$(mktemp -d "$RESULTS/attention_eval_XXXXXX")"
-  for MODE in none p4; do
-    BEST_STUDENT="$ROOT/$MODE/detection_best.pt"
+  for MODE in no_memory attention_memory; do
+    BEST_STUDENT="$(experiment_dir "$MODE")/detection_best.pt"
     [[ -f "$BEST_STUDENT" ]] || { echo "Missing best checkpoint: $BEST_STUDENT" >&2; exit 1; }
     printf 'Evaluating %s using %s\n' "$MODE" "$BEST_STUDENT"
     python -u train_attention_models.py eval --memory "$MODE" --checkpoint "$BEST_STUDENT" --device cuda \

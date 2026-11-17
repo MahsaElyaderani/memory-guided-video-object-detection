@@ -1,3 +1,4 @@
+"""Shared SSD training loss: anchor matching, classification, hard-negative mining, and box regression."""
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Sequence

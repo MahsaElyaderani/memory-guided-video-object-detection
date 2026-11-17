@@ -1,4 +1,4 @@
-"""Checkpoint-specific timm features; project inputs are RGB in [-1, 1]."""
+"""Backbone definitions: pretrained timm features and checkpoint-specific normalization for RGB inputs in [-1, 1]."""
 import torch
 from torch import nn
 

@@ -1,3 +1,4 @@
+"""Shared runtime utilities for data selection, progress reporting, file locking, and checkpoint I/O."""
 from __future__ import annotations
 
 from contextlib import contextmanager

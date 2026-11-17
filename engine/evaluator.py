@@ -1,3 +1,4 @@
+"""Reusable evaluation utilities for detection postprocessing, AP metrics, and classification metrics."""
 from __future__ import annotations
 
 from collections import defaultdict

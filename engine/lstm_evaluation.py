@@ -1,3 +1,4 @@
+"""Reusable LSTM evaluation engine for training validation and exported runs; also provides detection decoding."""
 from collections import Counter
 from dataclasses import dataclass
 import hashlib

@@ -1,3 +1,4 @@
+"""Reusable batching and sampling utilities, including deterministic mid-epoch resume."""
 from __future__ import annotations
 
 from typing import Sequence, Tuple

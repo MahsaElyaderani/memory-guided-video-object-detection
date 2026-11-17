@@ -1,3 +1,4 @@
+"""Shared convolution component implementing TensorFlow-style SAME padding."""
 import math
 
 from torch import nn

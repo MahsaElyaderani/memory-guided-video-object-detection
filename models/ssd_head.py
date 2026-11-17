@@ -1,3 +1,4 @@
+"""Model components: multiscale SSD features and classification/box prediction heads."""
 from __future__ import annotations
 
 from typing import Sequence, Tuple, List

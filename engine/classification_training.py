@@ -1,4 +1,4 @@
-"""Shared multi-label classification training and validation for VID models."""
+"""Reusable engine for multi-label classification training and validation, shared by standalone and joint models."""
 import torch
 from torch.utils.data import DataLoader
 

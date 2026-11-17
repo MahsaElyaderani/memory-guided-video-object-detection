@@ -1,4 +1,4 @@
-"""Command-line evaluation of standalone and joint LSTM detectors."""
+"""Evaluation entry point: loads LSTM detectors and data, then calls the reusable evaluation engine."""
 from pathlib import Path
 
 from path import parse_paths

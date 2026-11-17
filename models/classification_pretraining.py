@@ -1,4 +1,4 @@
-"""Multi-label classification with standalone backbones or a shared recurrent model."""
+"""Model definition for backbone-only standalone classification or joint classification with shared LSTM memory."""
 import torch
 from torch import nn
 from datasets.frame_views import PairedFrames, big_frames

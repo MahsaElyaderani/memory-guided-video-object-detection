@@ -1,4 +1,4 @@
-"""Multi-label classification of VID frames using all annotated object categories."""
+"""Reusable classification dataset and transforms: converts VID frame annotations into multi-label targets."""
 import random
 import torch
 from torchvision.transforms import functional as TF

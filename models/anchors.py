@@ -1,3 +1,4 @@
+"""Shared detection components for SSD anchor generation, box coding, and target matching."""
 from __future__ import annotations
 
 from dataclasses import dataclass

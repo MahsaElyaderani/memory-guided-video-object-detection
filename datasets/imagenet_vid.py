@@ -1,3 +1,4 @@
+"""Reusable dataset loader for ImageNet VID annotations, frames, and consecutive video clips."""
 from __future__ import annotations
 
 import json

@@ -1,3 +1,4 @@
+"""Entry point for separate joint LSTM detection training and resume."""
 from path import parse_paths
 from utils.resume import resume_defaults
 import argparse

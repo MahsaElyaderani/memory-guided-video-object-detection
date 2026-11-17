@@ -1,3 +1,4 @@
+"""Reusable image and box transforms for training augmentation and detection input resizing."""
 from __future__ import annotations
 
 import random

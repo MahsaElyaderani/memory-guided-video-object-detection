@@ -1,4 +1,4 @@
-"""Prepare a separate random joint-training run from a completed paired checkpoint."""
+"""Preparation entry point: creates a separate joint-training run from a completed detector checkpoint."""
 from path import parse_paths, required_path, resume_launcher
 
 import argparse

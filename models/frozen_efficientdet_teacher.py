@@ -1,4 +1,4 @@
-"""Frozen Delta fork teacher using its released preprocessing, weights and T=1 path."""
+"""Frozen teacher adapter: loads EfficientDet and extracts keyframe detections and P4 memory features."""
 import runpy
 import sys
 import numpy as np

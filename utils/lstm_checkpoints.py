@@ -1,4 +1,4 @@
-"""LSTM detector checkpoint loading, initialization, and validation selection."""
+"""Reusable LSTM checkpoint utilities for loading, initialization, metadata, and validation-based selection."""
 from dataclasses import asdict
 import hashlib
 import json

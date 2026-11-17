@@ -1,3 +1,4 @@
+"""Checkpoint utilities for native stage-model loading, weight transfer, and random-state capture/restore."""
 from dataclasses import asdict
 import random
 import torch

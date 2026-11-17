@@ -1,3 +1,4 @@
+"""Model definition for one backbone, a bottleneck LSTM, and SSD detection heads."""
 from __future__ import annotations
 
 from typing import Dict, List, Tuple

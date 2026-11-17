@@ -1,4 +1,4 @@
-"""Matched timm classification -> detection experiments; legacy trainers are unchanged."""
+"""Entry point for standalone and joint LSTM experiments: classification pretraining and detection training."""
 import argparse
 from copy import copy
 from pathlib import Path

@@ -1,3 +1,4 @@
+"""Model definition for small and big backbones sharing LSTM memory and SSD heads."""
 import torch
 from torch import nn
 from paired_config import PairedConfig, MemoryCorruption

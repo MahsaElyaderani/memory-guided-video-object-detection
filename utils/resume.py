@@ -1,4 +1,4 @@
-"""Resume defaults without carrying machine-specific paths between machines."""
+"""Shared resume utilities for restoring saved arguments and optimizer state."""
 import math
 import sys
 

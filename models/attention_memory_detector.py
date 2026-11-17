@@ -1,4 +1,4 @@
-"""TinyNet-D through blocks.4, with optional fixed-addition keyframe memory."""
+"""Model definition: TinyNet-D through blocks.4 and SSD, with optional cached-keyframe attention memory."""
 import torch
 from torch import nn
 from torch.nn import functional as F

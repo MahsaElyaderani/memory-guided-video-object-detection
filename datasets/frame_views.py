@@ -1,4 +1,4 @@
-"""Two RGB views resized from the same source, before backbone normalization."""
+"""Shared data container: two RGB resolutions of the same frame, before backbone normalization."""
 from dataclasses import dataclass
 import torch
 

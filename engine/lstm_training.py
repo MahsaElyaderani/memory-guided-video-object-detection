@@ -1,3 +1,4 @@
+"""Reusable LSTM detection training engine; also provides loss construction used by attention experiments."""
 from dataclasses import asdict
 import argparse
 from utils.resume import saved_arguments, restore_optimizer

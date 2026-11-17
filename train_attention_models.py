@@ -1,4 +1,4 @@
-"""Train or evaluate the matched TinyNet-D blocks.4 memory experiment."""
+"""Entry point for training and evaluating attention-memory students and their no-memory baseline."""
 import argparse
 import json
 import random

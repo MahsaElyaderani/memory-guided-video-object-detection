@@ -15,7 +15,7 @@ For code review, follow the launcher → entry point → model → shared utilit
 | --- | --- |
 | LSTM training and classification pretraining | `train_lstm_models.py`, `engine/classification_training.py`, `engine/lstm_training.py` |
 | LSTM architecture | `models/classification_pretraining.py`, `models/joint_lstm_detector.py`, `models/lstm_ssd_detector.py` |
-| Attention training and evaluation | `train_attention_models.py`, `models/attention_memory_detector.py`, `models/frozen_efficientdet_teacher.py` |
+| Attention training and evaluation | `train_attention_models.py`, `engine/attention.py`, `models/attention_memory_detector.py`, `models/frozen_efficientdet_teacher.py` |
 | Shared feature extraction and detection | `models/backbones.py`, `models/ssd_head.py`, `losses/multibox_loss.py`, `engine/evaluator.py` |
 | LSTM evaluation | `evaluate_lstm_models.py`, `engine/lstm_evaluation.py` |
 | Data, settings, and resume | `datasets/`, `path.py`, `config.py`, `lstm_config.py`, `utils/resume.py`, `utils/runtime.py` |

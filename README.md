@@ -70,6 +70,9 @@ student-frame COCO AP50 and also reports whole-sequence COCO AP50 and continuous
 AP50. Compare models using identical validation frames and metric definitions;
 compare FPS using the same device and hardware.
 
-LSTM evaluation saves results in a new directory under `RESULTS_DIR`; attention
-evaluation prints its metrics. Full-validation evaluation is not exposed by these
+Both launchers save evaluation results in a new directory under `RESULTS_DIR`.
+Attention exports include metrics, per-frame predictions, and ground-truth/prediction
+videos for both `none` and `p4`, with teacher keyframes labeled. The saved predictions
+can also be compared side by side using `evaluate.compare_detection_runs`, without
+rerunning inference. Full-validation evaluation is not exposed by these
 launchers; attention evaluation additionally enforces its saved manifest.

@@ -34,10 +34,15 @@ if [[ "$ACTION" != eval ]]; then
 fi
 
 if [[ "$ACTION" != train ]]; then
+  RESULTS="$(python path.py --get RESULTS_DIR)"
+  mkdir -p "$RESULTS"
+  OUT="$(mktemp -d "$RESULTS/attention_eval_XXXXXX")"
   for MODE in none p4; do
     BEST_STUDENT="$ROOT/$MODE/detection_best.pt"
     [[ -f "$BEST_STUDENT" ]] || { echo "Missing best checkpoint: $BEST_STUDENT" >&2; exit 1; }
     printf 'Evaluating %s using %s\n' "$MODE" "$BEST_STUDENT"
-    python -u train_attention_models.py eval --memory "$MODE" --checkpoint "$BEST_STUDENT" --device cuda
+    python -u train_attention_models.py eval --memory "$MODE" --checkpoint "$BEST_STUDENT" --device cuda \
+      --output-dir "$OUT/$MODE" --visuals
   done
+  printf 'Evaluation results: %s\n' "$OUT"
 fi

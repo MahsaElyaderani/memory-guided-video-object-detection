@@ -95,8 +95,9 @@ def compare_runs(run_paths, frames_root, output_dir, labels=None, threshold=.3, 
             table = csv.writer(stream)
             table.writerow(["mode", "AP50_percent", "FPS", "conv_linear_GFLOPs_per_frame", "big_call_frequency"])
             for label, item in zip(labels, metrics):
-                table.writerow([label, 100*item["mAP@0.5"], item["FPS"], item["conv_linear_FLOPs_per_frame"]/1e9,
-                                item["big_call_frequency"]])
+                flops = item.get("conv_linear_FLOPs_per_frame")
+                table.writerow([label, 100*item["mAP@0.5"], item.get("FPS", "NA"),
+                                flops/1e9 if flops is not None else "NA", item.get("big_call_frequency", "NA")])
         with (output / "per_class.csv").open("x", newline="") as stream:
             table = csv.writer(stream)
             table.writerow(["class"] + [label + "_AP50_percent" for label in labels])

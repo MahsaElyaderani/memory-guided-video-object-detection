@@ -1,5 +1,6 @@
 """Entry point for training and evaluating attention-memory students and their no-memory baseline."""
 import argparse
+from collections import Counter
 import json
 import random
 import uuid
@@ -15,6 +16,8 @@ import path
 from datasets.dataloader import budget_loader
 from datasets.transforms import TrainTransform, resize_detection_views
 from engine.evaluator import decode
+from engine.visualizer import DetectionVideoExporter
+from utils.evaluation_data import normalized_target, raw_detection_row
 from losses.multibox_loss import criterion_for
 from models.frozen_efficientdet_teacher import EfficientDetTeacher
 from models.attention_memory_detector import P4Student
@@ -23,7 +26,7 @@ from routing.predictions import sha256_file
 from scripts.compare_vid import load_manifest, score_predictions
 from train_lstm_models import model_from_matched, save_matched_checkpoints, seed_training
 from utils.checkpoints import capture_rng, restore_rng
-from utils.runtime import run_lock, load_checkpoint, tqdm
+from utils.runtime import run_lock, load_checkpoint, tqdm, write_json
 from vid_categories import vid_to_dataset_labels
 
 
@@ -51,7 +54,7 @@ def collate_pairs(batch):
 
 
 @torch.no_grad()
-def evaluate(student, teacher, selection, dataset, device):
+def evaluate(student, teacher, selection, dataset, device, on_prediction=None):
     student.eval()
     mapping = vid_to_dataset_labels(dataset)
     key_rows, small_rows, small_frames = [], [], []
@@ -64,25 +67,81 @@ def evaluate(student, teacher, selection, dataset, device):
         width, height = image.size
         if [width, height] != frame['original_size']:
             raise ValueError('Frame dimensions differ from validation annotations.')
+        rows = []
         if step % 10 == 0:
             cache, detections = teacher.keyframe([image], detect=True)
             info = dict(id=frame['image_id'], width=width, height=height)
             for row in teacher.records(detections[0], info, 0.):
                 row['category_id'] = mapping[row['category_id']]
-                key_rows.append(row)
+                rows.append(row)
         else:
             small_frames.append(frame)
             view = resize_detection_views(image, 160, 'bicubic')[None].to(device)
             pred = decode(student(view, cache), student, 0.)
             for box, label, score in zip(pred['boxes'].tolist(), pred['labels'].tolist(), pred['scores'].tolist()):
                 x, y, right, bottom = box
-                small_rows.append(dict(image_id=frame['image_id'], category_id=label, score=score,
+                rows.append(dict(image_id=frame['image_id'], category_id=label, score=score,
                                        bbox=[x*width, y*height, (right-x)*width, (bottom-y)*height]))
+        (key_rows if step % 10 == 0 else small_rows).extend(rows)
+        if on_prediction is not None:
+            on_prediction(frame, rows, step)
         previous, step = frame['video_id'], step + 1
     if not small_frames:
         raise ValueError('Validation needs at least one intervening student frame.')
     return {'student': score_predictions({**selection, 'frames': small_frames}, small_rows),
             'sequence': score_predictions(selection, key_rows + small_rows)}
+
+
+def export_evaluation(student, teacher, selection, dataset, device, output, visuals=False):
+    output.mkdir(parents=True, exist_ok=False)
+    write_json({'status': 'running'}, output/'run_status.json')
+    exporter = None
+    try:
+        if visuals:
+            exporter = DetectionVideoExporter(dataset, output, student.memory, save_frames_every=1)
+        write_json(selection, output/'selection.json')
+        with (output/'detections.jsonl').open('x') as stream:
+            def save(frame, rows, step):
+                # Match score_predictions: discard degenerate boxes, retain top 100 per frame.
+                rows = sorted((r for r in rows if r['bbox'][2] > 0 and r['bbox'][3] > 0),
+                              key=lambda r: r['score'], reverse=True)[:100]
+                width, height = frame['original_size']
+                boxes = torch.tensor([r['bbox'] for r in rows], dtype=torch.float64).reshape(-1, 4)
+                boxes[:, 2:] += boxes[:, :2]
+                pred = dict(boxes=boxes/boxes.new_tensor([width, height, width, height]),
+                            labels=torch.tensor([r['category_id'] for r in rows], dtype=torch.long),
+                            scores=torch.tensor([r['score'] for r in rows], dtype=torch.float64))
+                record = dataset.routing_records[frame['image_id']]
+                target = normalized_target(dataset, record)
+                route = dict(selected_model='teacher' if step % 10 == 0 else 'student_' + student.memory,
+                             previous_contribution_age=step % 10)
+                row = raw_detection_row(record, target, pred, dataset.label_to_name)
+                row.update(route=route, coco_predictions=rows)
+                stream.write(json.dumps(row, allow_nan=False) + '\n')
+                if exporter:
+                    exporter(record, target, pred, route)
+            metrics = evaluate(student, teacher, selection, dataset, device, save)
+        if exporter:
+            exporter.close()
+            write_json({'videos': exporter.video_index}, output/'videos_index.json')
+        sequence = metrics['sequence']
+        counts = dict(Counter(f['video_id'] for f in selection['frames']))
+        write_json({**metrics, 'mAP@0.5': sequence['continuous_AP50'],
+                    'AP@0.5_per_class': sequence['continuous_AP50_per_class'],
+                    'num_frames': sequence['frames'], 'video_ids': list(counts), 'frames_per_video': counts,
+                    'evaluated_image_ids': [f['image_id'] for f in selection['frames']],
+                    'class_names': dataset.label_to_name,
+                    'ground_truth_counts_per_class': sequence['positive_counts_per_class'],
+                    'score_threshold': 0., 'max_detections_per_class': 100, 'max_total_detections': 100,
+                    'nms_iou_threshold': {'student': student.ssd_cfg.nms_iou_threshold,
+                                          'teacher': 'checkpoint configuration'}}, output/'metrics.json')
+        write_json({'status': 'complete', 'num_frames': sequence['frames']}, output/'run_status.json')
+        return metrics
+    except BaseException as error:
+        if exporter:
+            exporter.close()
+        write_json({'status': 'failed', 'error': str(error)}, output/'run_status.json')
+        raise
 
 
 def run(args):
@@ -122,7 +181,12 @@ def run(args):
     if saved:
         student.load_state_dict(saved['model'], strict=True)
     if args.action == 'eval':
-        metrics = evaluate(student, teacher, selection, val, args.device)
+        if args.output_dir:
+            metrics = export_evaluation(student, teacher, selection, val, args.device, args.output_dir, args.visuals)
+            write_json(dict(checkpoint=str(args.checkpoint.resolve()), updates=saved['updates'], run_id=saved['run_id'],
+                            teacher_sha256=teacher_hash, manifest_sha256=manifest_hash), args.output_dir/'evaluation_source.json')
+        else:
+            metrics = evaluate(student, teacher, selection, val, args.device)
         print(json.dumps(metrics, indent=2))
         return metrics
 
@@ -206,6 +270,8 @@ def main():
     source.add_argument('--init-detector', type=Path, help='Matched detection checkpoint supplying TinyNet-D and SSD weights')
     source.add_argument('--checkpoint', type=Path, help='Latest checkpoint for resume, or latest/best for evaluation')
     parser.add_argument('--run-dir', type=Path)
+    parser.add_argument('--output-dir', type=Path, help='Fresh evaluation folder for predictions and metrics')
+    parser.add_argument('--visuals', action='store_true', help='Also save annotated videos and frames')
     parser.add_argument('--delta-root', type=Path)
     parser.add_argument('--teacher-checkpoint', type=Path)
     parser.add_argument('--subset', type=Path, default=path.MATCHED_TRAIN_SUBSET)
@@ -223,6 +289,10 @@ def main():
     parser.add_argument('--seed', type=int)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
+    if (args.output_dir or args.visuals) and args.action != 'eval':
+        parser.error('Exports are evaluation-only.')
+    if args.visuals and not args.output_dir:
+        parser.error('--visuals requires --output-dir.')
     if args.action == 'eval' and not args.checkpoint:
         parser.error('Evaluation requires --checkpoint.')
     args.run_dir = args.run_dir or path.RUNS_DIR / 'p4_student' / args.memory

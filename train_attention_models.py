@@ -9,7 +9,7 @@ import uuid
 import torch
 
 import path
-from utils.runtime import run_lock, ATTENTION_MEMORY_NAMES, load_checkpoint, write_json, early_stopping_reached
+from utils.runtime import run_lock, ATTENTION_MEMORY_NAMES, load_checkpoint, write_json, early_stopping_reached, seed_training
 from utils.checkpoints import restore_rng
 from routing.data import data_signature, guard_held_out, selected_dataset
 from routing.predictions import sha256_file
@@ -17,7 +17,6 @@ from scripts.compare_vid import load_manifest
 from models.frozen_efficientdet_teacher import EfficientDetTeacher
 from models.attention_memory_detector import P4Student
 from losses.multibox_loss import criterion_for
-from train_lstm_models import seed_training
 from engine import trainer_attention as trainer
 # Preserve established imports while the implementations live in the engine.
 from datasets.dataset_imagenetvid import TrainingPairs

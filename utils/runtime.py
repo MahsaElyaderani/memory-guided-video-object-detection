@@ -20,6 +20,28 @@ ATTENTION_MEMORY_NAMES = {"none": "no_memory", "p4": "attention_memory"}
 LOSS_KEYS = ("total_loss", "classification_loss", "localization_loss")
 
 
+def seed_training(seed):
+    random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def save_matched_checkpoints(payload, destination, select_best=True):
+    if not select_best:
+        atomic_save_checkpoint(payload, destination)
+        return
+    key = payload.get('selection_metric',
+                      'bce_loss' if payload['stage'] == 'matched_classification' else 'mAP@0.5')
+    scores = [row['validation'][key] for row in payload['history']]
+    if not all(math.isfinite(score) for score in scores):
+        raise ValueError('Cannot select a best checkpoint from non-finite validation scores.')
+    best = min if key == 'bce_loss' else max
+    improved = len(scores) == 1 or best(scores) != best(scores[:-1])
+    if improved:
+        best_path = destination.with_name(destination.stem + '_best' + (destination.suffix or '.pt'))
+        atomic_save_checkpoint(payload, best_path)
+    atomic_save_checkpoint(payload, destination)
+
+
 def early_stopping_reached(payload, enabled, destination=None):
     """Count consecutive non-improving validations from history, including on resume."""
     if not enabled or not payload or not payload.get('history'):

@@ -9,9 +9,8 @@ from datasets.dataset_imagenetvid import TrainingPairs
 from datasets.transforms import resize_detection_views
 from engine.evaluator import decode, export_evaluation
 from scripts.compare_vid import score_predictions
-from train_lstm_models import save_matched_checkpoints
 from utils.checkpoints import capture_rng
-from utils.runtime import tqdm, early_stopping_reached, ATTENTION_MEMORY_NAMES
+from utils.runtime import tqdm, early_stopping_reached, ATTENTION_MEMORY_NAMES, save_matched_checkpoints
 from vid_categories import vid_to_dataset_labels
 
 def train_batches(student, teacher, loader, optimizer, scheduler, criterion, *, device, epoch):

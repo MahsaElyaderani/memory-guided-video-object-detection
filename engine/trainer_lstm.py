@@ -21,14 +21,13 @@ from utils.lstm_checkpoints import detector_fingerprint, lstm_metadata
 from utils.checkpoints import capture_rng, restore_rng
 from utils.resume import saved_arguments
 from engine.classification_training import classification_epoch
-from utils.runtime import tqdm, LOSS_KEYS, loss_postfix, early_stopping_reached
+from utils.runtime import (tqdm, LOSS_KEYS, loss_postfix, early_stopping_reached,
+                           seed_training, save_matched_checkpoints)
 from datasets.dataloader import budget_loader
 
 def train(model, train_data, val_data, optimizer, args, *, resume, metadata,
           sources, signatures, definition, early_stopping=False):
     """Train a prepared classification or detection run, validate, and save checkpoints."""
-    from train_lstm_models import seed_training, save_matched_checkpoints
-
     destination = Path(args.checkpoint_out)
     history, run_id = (list(resume['history']), resume['run_id']) if resume else ([], uuid.uuid4().hex)
 
@@ -82,7 +81,6 @@ def train(model, train_data, val_data, optimizer, args, *, resume, metadata,
 
 
 def train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping=False):
-    from train_lstm_models import seed_training
 
     if args.lr_schedule not in ('linear', 'cosine'):
         raise ValueError('Only linear and cosine training schedules are supported.')

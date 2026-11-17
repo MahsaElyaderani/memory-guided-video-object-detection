@@ -17,7 +17,7 @@ from paired_config import MemoryCorruption, probability
 from utils.compute import profile_conv_linear, synchronize
 from routing.data import data_signature
 from utils.evaluation_data import load_frame, normalized_target, raw_detection_row
-from routing.paired_policy import VideoContext, choose_big, forced_big
+from routing.backbone_schedule import VideoContext, choose_big, forced_big
 from routing.predictions import detection, filtered
 from utils.lstm_checkpoints import detector_fingerprint
 from utils.runtime import write_json, tqdm, LOSS_KEYS, loss_postfix

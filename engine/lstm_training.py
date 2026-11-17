@@ -17,7 +17,7 @@ from losses.multibox_loss import MultiBoxLoss, criterion_for
 from models.joint_lstm_detector import corrupt_memory
 from paired_config import MemoryCorruption, PairedConfig, PolicyConfig
 from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
-from routing.paired_policy import random_training_schedule, validate_random_training_resume
+from routing.backbone_schedule import random_training_schedule, validate_random_training_resume
 from utils.checkpoints import capture_rng, restore_rng
 from utils.lstm_checkpoints import paired_metadata, initialize_pair, load_pair, finish_validation
 from utils.runtime import save_training_payload, run_lock, LOSS_KEYS, load_checkpoint, loss_postfix, tqdm

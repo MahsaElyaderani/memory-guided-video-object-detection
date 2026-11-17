@@ -4,7 +4,7 @@ from torch import nn
 from datasets.frame_views import PairedFrames, big_frames
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector, select_memory
-from routing.paired_policy import random_training_schedule
+from routing.backbone_schedule import random_training_schedule
 
 
 class JointClassifier(nn.Module):

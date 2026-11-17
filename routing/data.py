@@ -101,6 +101,6 @@ def guard_held_out(training_signatures, dataset):
 
 
 def movement_between_frames(previous, current):
-    from .paired_policy import frame_signature, frame_change
+    from .backbone_schedule import frame_signature, frame_change
     signature = frame_signature(current)
     return signature, frame_change(signature, previous)

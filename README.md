@@ -41,6 +41,11 @@ OmegaConf, and pycocotools are also required.
 Resume uses latest checkpoints; keep the saved training settings unchanged.
 LSTM launchers print the selected run folders; `RUN_NAME` selects an explicit run.
 Attention runs are stored under `RUNS_DIR/p4_student/{none,p4}`.
+The attention launcher's optional second argument is `detector` (default) or
+`imagenet`. ImageNet initialization uses pretrained TinyNet-D with fresh SSD layers,
+stores runs under `RUNS_DIR/p4_student_imagenet/{none,p4}`, and requires no detector
+checkpoint. Both options resume their own latest checkpoints; use the same second
+argument for evaluation. Both still require the frozen teacher weights.
 [show_train_history.sh](launchers/show_train_history.sh) reports saved training and
 validation history, best scores, learning rates, and remaining updates.
 

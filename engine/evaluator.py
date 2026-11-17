@@ -8,6 +8,7 @@ from typing import Dict, List, Sequence
 import torch
 from torch import Tensor
 from torchvision.ops import nms
+from routing.predictions import detection
 
 try:
     from utils.runtime import tqdm, LOSS_KEYS, loss_postfix
@@ -20,6 +21,16 @@ try:
 except ImportError:
     from ..models.anchors import BoxCoderScales, decode_boxes
     from ..models.lstm_ssd_detector import LSTMSSD
+
+
+def decode(output, model, threshold, maximum=100):
+    for key in ("class_logits", "box_regression"):
+        if not torch.isfinite(output[key]).all():
+            raise FloatingPointError("Non-finite detector output.")
+    return detection(**postprocess_detections(
+        output["class_logits"], output["box_regression"], output["anchors"], num_classes=30,
+        score_threshold=threshold, nms_iou_threshold=model.ssd_cfg.nms_iou_threshold,
+        max_detections_per_class=maximum, max_total_detections=maximum))
 
 
 def _box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:

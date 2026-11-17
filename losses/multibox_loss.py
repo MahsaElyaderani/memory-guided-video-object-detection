@@ -13,6 +13,13 @@ except ImportError:
     from ..models.anchors import BoxCoderScales, encode_boxes, match_anchors
 
 
+def criterion_for(model):
+    from models.anchors import BoxCoderScales
+    s = model.ssd_cfg
+    return MultiBoxLoss(num_classes=30, match_iou_threshold=s.match_iou_threshold,
+                        box_coder_scales=BoxCoderScales(s.y_scale, s.x_scale, s.height_scale, s.width_scale))
+
+
 def hard_negative_mining(
     classification_loss_per_anchor: Tensor,
     positive_mask: Tensor,

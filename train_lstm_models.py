@@ -11,7 +11,8 @@ from torch import nn
 from datasets.classification import VIDClassificationDataset
 from datasets.dataloader import budget_loader
 from engine.lstm_training import (add_training_arguments, build_training_data, make_loader,
-                                   criterion_for, train_detector_epoch)
+                                   train_detector_epoch)
+from losses.multibox_loss import criterion_for
 from engine.lstm_evaluation import evaluate_paired, EvaluationOptions
 from models.classification_pretraining import JointClassifier
 from models.lstm_ssd_detector import LSTMSSD

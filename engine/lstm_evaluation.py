@@ -1,4 +1,4 @@
-"""Reusable LSTM evaluation engine for training validation and exported runs; also provides detection decoding."""
+"""Reusable LSTM evaluation engine for training validation and exported runs."""
 from collections import Counter
 from dataclasses import dataclass
 import hashlib
@@ -9,7 +9,8 @@ import time
 
 import torch
 
-from engine.evaluator import compute_map50, postprocess_detections
+from engine.evaluator import compute_map50, postprocess_detections, decode
+from losses.multibox_loss import criterion_for
 from models.joint_lstm_detector import corrupt_memory
 from datasets.frame_views import PairedFrames
 from paired_config import MemoryCorruption, probability
@@ -70,16 +71,6 @@ def select_paired_frames(dataset, frames_per_video=None, seed=0):
     return refresh_records(dataset)
 
 
-def decode(output, model, threshold, maximum=100):
-    for key in ("class_logits", "box_regression"):
-        if not torch.isfinite(output[key]).all():
-            raise FloatingPointError("Non-finite detector output.")
-    return detection(**postprocess_detections(
-        output["class_logits"], output["box_regression"], output["anchors"], num_classes=30,
-        score_threshold=threshold, nms_iou_threshold=model.ssd_cfg.nms_iou_threshold,
-        max_detections_per_class=maximum, max_total_detections=maximum))
-
-
 def profiled_costs(model, device, warmup):
     frame = torch.zeros(1, 3, model.model_cfg.image_size, model.model_cfg.image_size, device=device)
     if model.model_cfg.uses_timm:
@@ -121,12 +112,7 @@ def evaluate_paired(model, dataset, policy, options=None, corruption=None,
     loss_totals = dict.fromkeys(LOSS_KEYS, 0.)
     criterion = None
     if options.compute_losses:
-        from losses.multibox_loss import MultiBoxLoss
-        from models.anchors import BoxCoderScales
-        cfg = model.ssd_cfg
-        criterion = MultiBoxLoss(num_classes=30, match_iou_threshold=cfg.match_iou_threshold,
-                                 box_coder_scales=BoxCoderScales(cfg.y_scale, cfg.x_scale,
-                                                                cfg.height_scale, cfg.width_scale))
+        criterion = criterion_for(model)
     with torch.no_grad(), tqdm(total=len(dataset.routing_records), desc=policy.mode, unit="frame",
                               disable=not options.progress) as bar:
         for video_id in dataset.video_ids:

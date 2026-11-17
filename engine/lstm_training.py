@@ -1,4 +1,4 @@
-"""Reusable LSTM detection training engine; also provides loss construction used by attention experiments."""
+"""Reusable LSTM detection training engine."""
 from dataclasses import asdict
 import argparse
 from utils.resume import saved_arguments, restore_optimizer
@@ -13,7 +13,7 @@ import torch
 from datasets.dataloader import build_dataloader
 from datasets.transforms import TrainTransform
 from engine.lstm_evaluation import EvaluationOptions, evaluate_paired, select_paired_frames
-from losses.multibox_loss import MultiBoxLoss
+from losses.multibox_loss import MultiBoxLoss, criterion_for
 from models.joint_lstm_detector import corrupt_memory
 from paired_config import MemoryCorruption, PairedConfig, PolicyConfig
 from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
@@ -21,12 +21,6 @@ from routing.paired_policy import random_training_schedule, validate_random_trai
 from utils.checkpoints import capture_rng, restore_rng
 from utils.lstm_checkpoints import paired_metadata, initialize_pair, load_pair, finish_validation
 from utils.runtime import save_training_payload, run_lock, LOSS_KEYS, load_checkpoint, loss_postfix, tqdm
-
-def criterion_for(model):
-    from models.anchors import BoxCoderScales
-    s = model.ssd_cfg
-    return MultiBoxLoss(num_classes=30, match_iou_threshold=s.match_iou_threshold,
-                        box_coder_scales=BoxCoderScales(s.y_scale, s.x_scale, s.height_scale, s.width_scale))
 
 
 def detector_batch(model, frames, targets, criterion, corruption):

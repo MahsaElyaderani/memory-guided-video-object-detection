@@ -9,7 +9,7 @@ import time
 
 import torch
 
-from engine.lstm_evaluation import EvaluationOptions, export_paired_run, select_paired_frames
+from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames
 from paired_config import PolicyConfig, MemoryCorruption, PairedConfig
 from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
 from utils.lstm_checkpoints import paired_from_payload
@@ -130,7 +130,7 @@ def main(argv=None):
     if payload.get("validation_pending"):
         raise ValueError("Recover pending detector validation before evaluation.")
     dataset = selected_dataset(args, model.model_cfg.image_size, interpolation=model.model_cfg.input_interpolation, paired=model.model_cfg.uses_timm)
-    select_paired_frames(dataset, args.frames_per_video, args.subset_seed)
+    select_evaluation_frames(dataset, args.frames_per_video, args.subset_seed)
     validate_native_categories(payload, dataset)
     guard_held_out(payload.get("training_signatures", []), dataset)
     precision_ids = set()
@@ -165,7 +165,7 @@ def main(argv=None):
     try:
         for mode, policy in policies.items():
             name = f"fixed_k{args.interval}" if mode == "fixed" else mode
-            results[name] = export_paired_run(model, dataset,
+            results[name] = export_lstm_run(model, dataset,
                                               policy, options, output / name, corruption,
                                               precision_ids if mode == "fixed" else None, visuals)
             results[name]["evaluation_source"] = provenance

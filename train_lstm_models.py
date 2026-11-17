@@ -13,7 +13,7 @@ from datasets.dataloader import budget_loader
 from engine.lstm_training import (add_training_arguments, build_training_data, make_loader,
                                    train_detector_epoch)
 from losses.multibox_loss import criterion_for
-from engine.lstm_evaluation import evaluate_paired, EvaluationOptions
+from engine.lstm_evaluation import evaluate_lstm, EvaluationOptions
 from models.classification_pretraining import JointClassifier
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector
@@ -368,7 +368,7 @@ def train(args):
                     metrics = classification_epoch(model, val_data, val_args)
                 else:
                     policy = PolicyConfig(mode='big' if model.standalone else 'fixed', interval=args.big_call_interval)
-                    metrics, _ = evaluate_paired(model, val_data, policy,
+                    metrics, _ = evaluate_lstm(model, val_data, policy,
                         EvaluationOptions(args.device, score_threshold=0. if budget else .001,
                                           warmup_frames=0, progress=not args.no_progress))
             finally:

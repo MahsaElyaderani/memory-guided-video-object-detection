@@ -12,7 +12,7 @@ import torch
 
 from datasets.dataloader import build_dataloader
 from datasets.transforms import TrainTransform
-from engine.lstm_evaluation import EvaluationOptions, evaluate_paired, select_paired_frames
+from engine.lstm_evaluation import EvaluationOptions, evaluate_lstm, select_evaluation_frames
 from losses.multibox_loss import MultiBoxLoss, criterion_for
 from models.joint_lstm_detector import corrupt_memory
 from paired_config import MemoryCorruption, PairedConfig, PolicyConfig
@@ -134,7 +134,7 @@ def build_training_data(args, model, metadata):
         val_args = SimpleNamespace(annotations=args.val_annotations, frames_root=args.val_frames_root,
                                    video_ids=args.val_video_ids, max_videos=args.max_val_videos, subset_seed=args.subset_seed)
         val = selected_dataset(val_args, model.model_cfg.image_size, interpolation=model.model_cfg.input_interpolation, paired=model.model_cfg.uses_timm)
-        select_paired_frames(val, args.val_frames_per_video, args.subset_seed)
+        select_evaluation_frames(val, args.val_frames_per_video, args.subset_seed)
         validate_native_categories(metadata, val)
         guard_held_out([data_signature(train)], val)
     return train, val
@@ -151,7 +151,7 @@ def validation(model, dataset, args):
     rng = capture_rng()
     try:
         policy = PolicyConfig(mode="fixed", interval=args.big_call_interval)
-        metrics, _ = evaluate_paired(model, dataset, policy,
+        metrics, _ = evaluate_lstm(model, dataset, policy,
                                      EvaluationOptions(args.device, warmup_frames=0, progress=not args.no_progress))
         if getattr(args, "diagnostic_validation", False):
             diagnostics = {}
@@ -161,7 +161,7 @@ def validation(model, dataset, args):
                     ("small_zero_memory", PolicyConfig(mode="small", memory_feedback="none")),
                     ("fixed_no_memory", PolicyConfig(mode="fixed", interval=args.big_call_interval,
                                                      memory_feedback="none"))):
-                result, _ = evaluate_paired(model, dataset, diagnostic_policy,
+                result, _ = evaluate_lstm(model, dataset, diagnostic_policy,
                     EvaluationOptions(args.device, warmup_frames=0, progress=not args.no_progress))
                 diagnostics[name] = result
             metrics["diagnostics"] = diagnostics

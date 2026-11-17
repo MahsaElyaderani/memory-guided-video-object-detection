@@ -28,7 +28,7 @@ import numpy as np
 import torch
 from path import VAL_ANNOTATIONS, VAL_FRAMES
 from engine.evaluator import compute_map50
-from engine.lstm_evaluation import EvaluationOptions, export_paired_run, select_paired_frames, refresh_records
+from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames, refresh_records
 from evaluate_lstm_models import load_evaluation_model
 from paired_config import PolicyConfig
 from routing.data import selected_dataset, validate_native_categories, guard_held_out
@@ -153,7 +153,7 @@ def compare(args):
         validate_native_categories(payload, dataset)
         guard_held_out(payload.get('training_signatures', []), dataset)
         mode = 'big' if getattr(model, 'standalone', None) else 'fixed'
-        metrics = export_paired_run(model, dataset, PolicyConfig(mode, 10),
+        metrics = export_lstm_run(model, dataset, PolicyConfig(mode, 10),
                                    EvaluationOptions(args.device, 0., 100, 10, 0, True, False),
                                    args.output / name, visual_options={} if args.visuals else None)
         rows = []
@@ -241,7 +241,7 @@ def main():
     else:
         dataset = selected_dataset(argparse.Namespace(annotations=args.annotations, frames_root=args.frames_root,
                                    video_ids=None, max_videos=100, subset_seed=7))
-        select_paired_frames(dataset, 20, 7)
+        select_evaluation_frames(dataset, 20, 7)
         frames = frame_manifest(dataset)
         args.manifest.parent.mkdir(parents=True, exist_ok=True)
         write_json(args.manifest, dict(format_version=1, annotations_sha256=sha256_file(args.annotations),

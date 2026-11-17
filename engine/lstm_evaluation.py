@@ -44,7 +44,7 @@ def refresh_records(dataset):
     return dataset
 
 
-def select_paired_frames(dataset, frames_per_video=None, seed=0):
+def select_evaluation_frames(dataset, frames_per_video=None, seed=0):
     if frames_per_video is None:
         return refresh_records(dataset)
     if frames_per_video < 1 or dataset.clip_length != 1:
@@ -93,7 +93,7 @@ def seeded_corruption(state, config, seed, video_id, step):
     return corrupt_memory(state, [True], config, generator)
 
 
-def evaluate_paired(model, dataset, policy, options=None, corruption=None,
+def evaluate_lstm(model, dataset, policy, options=None, corruption=None,
                     precision_ids=None, on_prediction=None):
     options = options or EvaluationOptions()
     corruption = corruption or MemoryCorruption(probability=1.)
@@ -230,7 +230,7 @@ def evaluate_paired(model, dataset, policy, options=None, corruption=None,
     return metrics, routes
 
 
-def export_paired_run(model, dataset, policy, options, output_dir, corruption=None,
+def export_lstm_run(model, dataset, policy, options, output_dir, corruption=None,
                       precision_ids=None, visual_options=None):
     from dataclasses import asdict
     from engine.visualizer import PairedVideoExporter
@@ -247,7 +247,7 @@ def export_paired_run(model, dataset, policy, options, output_dir, corruption=No
                 routing.write(json.dumps(route, allow_nan=False) + "\n")
                 if exporter:
                     exporter(record, target, prediction, route)
-            metrics, _ = evaluate_paired(model, dataset, policy, options, corruption, precision_ids, save)
+            metrics, _ = evaluate_lstm(model, dataset, policy, options, corruption, precision_ids, save)
         if exporter:
             exporter.close()
             write_json({"videos": exporter.video_index}, output / "videos_index.json")
@@ -260,3 +260,9 @@ def export_paired_run(model, dataset, policy, options, output_dir, corruption=No
             exporter.close()
         write_json({"status": "failed", "error": str(error)}, output / "run_status.json")
         raise
+
+
+# Preserve existing imports, including engine.paired_evaluator.
+evaluate_paired = evaluate_lstm
+select_paired_frames = select_evaluation_frames
+export_paired_run = export_lstm_run

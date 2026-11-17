@@ -29,7 +29,7 @@ import torch
 from path import VAL_ANNOTATIONS, VAL_FRAMES
 from engine.evaluator import compute_map50
 from engine.lstm_evaluation import EvaluationOptions, export_paired_run, select_paired_frames, refresh_records
-from evaluate.evaluate_lstm_models import load_evaluation_model
+from evaluate_lstm_models import load_evaluation_model
 from paired_config import PolicyConfig
 from routing.data import selected_dataset, validate_native_categories, guard_held_out
 from routing.predictions import sha256_file

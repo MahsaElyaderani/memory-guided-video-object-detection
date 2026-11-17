@@ -10,10 +10,12 @@ from models.ssd_head import SSDBoxPredictor, SSDFeatureMaps
 
 
 class P4Student(nn.Module):
-    def __init__(self, memory, *, imagenet=False, detector=None):
+    def __init__(self, memory, *, imagenet=False, detector=None, projection=True):
         super().__init__()
         if memory not in ('none', 'p4'):
             raise ValueError('Expected none or p4 memory.')
+        if detector is not None and not projection:
+            raise ValueError('Projection-free students cannot inherit detector SSD weights.')
         self.memory = memory
         backbone = TimmMobileNetV2Backbone(model_name='tinynet_d.in1k')
         if imagenet:
@@ -29,10 +31,11 @@ class P4Student(nn.Module):
         self.blocks = net.blocks[:5]
         self.register_buffer('mean', backbone.input_mean)
         self.register_buffer('std', backbone.input_std)
-        self.projection = nn.Conv2d(64, 256, 1)
-        self.feature_maps = SSDFeatureMaps()
+        channels = 256 if projection else 64
+        self.projection = nn.Conv2d(64, 256, 1) if projection else nn.Identity()
+        self.feature_maps = SSDFeatureMaps(input_channels=channels)
         self.ssd_cfg = SSDConfig()
-        self.predictor = SSDBoxPredictor(ModelConfig().feature_channels, 30,
+        self.predictor = SSDBoxPredictor((channels, *ModelConfig().feature_channels[1:]), 30,
                                          self.ssd_cfg.num_anchors_per_location, True)
         self.anchors = SSDAnchorGenerator()
         if detector is not None:

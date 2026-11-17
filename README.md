@@ -46,6 +46,11 @@ The attention launcher's optional second argument is `detector` (default) or
 stores runs under `RUNS_DIR/p4_student_imagenet/{none,p4}`, and requires no detector
 checkpoint. Both options resume their own latest checkpoints; use the same second
 argument for evaluation. Both still require the frozen teacher weights.
+An optional third argument, `projection-free`, is supported with `imagenet` only:
+both students feed their 64-channel features directly into SSD, with no 64→256
+projection. These runs use `RUNS_DIR/p4_student_imagenet_no_projection/{none,p4}`.
+Use the same arguments for training, resume, and evaluation. The default remains
+`projected`; existing checkpoints retain their original architecture.
 [show_train_history.sh](launchers/show_train_history.sh) reports saved training and
 validation history, best scores, learning rates, and remaining updates.
 

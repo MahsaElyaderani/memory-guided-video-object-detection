@@ -153,10 +153,11 @@ def run(args):
     latest = args.run_dir / 'detection.pt'
     saved = load_checkpoint(args.checkpoint) if args.checkpoint else None
     if saved and (saved.get('stage') != 'p4_student_v1' or saved['memory'] != args.memory or
+                  saved.get('projection', True) != (not args.no_projection) or
                   saved['teacher_sha256'] != teacher_hash or saved['label_to_name'] != val.label_to_name or
                   saved['category_id_to_label'] != val.category_id_to_label or
                   saved['manifest_sha256'] != manifest_hash):
-        raise ValueError('Incompatible experiment, teacher, categories or validation manifest.')
+        raise ValueError('Incompatible experiment/projection, teacher, categories or validation manifest.')
     defaults = dict(epochs=100, batch_size=4, learning_rate=.001, seed=0, validate_every=5000, max_batches=None)
     for name, default in defaults.items():
         if getattr(args, name) is None:
@@ -176,7 +177,8 @@ def run(args):
         guard_held_out(source.get('training_signatures', []), val)
         detector = model_from_matched(source)
         del source
-    student = P4Student(args.memory, imagenet=not (saved or detector), detector=detector).to(args.device)
+    student = P4Student(args.memory, imagenet=not (saved or detector), detector=detector,
+                        projection=not args.no_projection).to(args.device)
     del detector
     if saved:
         student.load_state_dict(saved['model'], strict=True)
@@ -250,6 +252,7 @@ def run(args):
             history.append(dict(epoch=epoch+1, update=step, train_loss=loss_sum/count,
                                 validation={'student_COCO_AP50': metrics['student']['coco_AP50'], **metrics}))
         payload = dict(stage='p4_student_v1', run_id=run_id, memory=args.memory, initialization=init_source,
+                       projection=not args.no_projection,
                        model=student.state_dict(), optimizer=optimizer.state_dict(), scheduler=scheduler.state_dict(),
                        updates=step, epoch=epoch+1, rng=capture_rng(), history=history, settings=settings,
                        teacher_sha256=teacher_hash, manifest_sha256=manifest_hash,
@@ -266,6 +269,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('train', 'eval'))
     parser.add_argument('--memory', required=True, choices=('none', 'p4'))
+    parser.add_argument('--no-projection', action='store_true', help='Use 64-channel SSD input; requires ImageNet initialization')
     source = parser.add_mutually_exclusive_group()
     source.add_argument('--init-detector', type=Path, help='Matched detection checkpoint supplying TinyNet-D and SSD weights')
     source.add_argument('--checkpoint', type=Path, help='Latest checkpoint for resume, or latest/best for evaluation')
@@ -289,13 +293,16 @@ def main():
     parser.add_argument('--seed', type=int)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
+    if args.no_projection and args.init_detector:
+        parser.error('--no-projection cannot be combined with --init-detector.')
     if (args.output_dir or args.visuals) and args.action != 'eval':
         parser.error('Exports are evaluation-only.')
     if args.visuals and not args.output_dir:
         parser.error('--visuals requires --output-dir.')
     if args.action == 'eval' and not args.checkpoint:
         parser.error('Evaluation requires --checkpoint.')
-    args.run_dir = args.run_dir or path.RUNS_DIR / 'p4_student' / args.memory
+    args.run_dir = args.run_dir or path.RUNS_DIR / (
+        'p4_student_imagenet_no_projection' if args.no_projection else 'p4_student') / args.memory
     args.task, args.prefetch_factor, args.sharing_strategy = 'detection', 1, None
     if args.action == 'train':
         with run_lock(args.run_dir/'detection.pt'):

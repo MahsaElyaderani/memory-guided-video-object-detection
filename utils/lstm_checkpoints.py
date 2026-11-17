@@ -1,17 +1,14 @@
-"""Reusable LSTM checkpoint utilities for loading, initialization, metadata, and validation-based selection."""
+"""Reusable LSTM checkpoint utilities for loading, metadata, and fingerprints."""
 from dataclasses import asdict
 import hashlib
 import json
-from pathlib import Path
 
 import torch
 
-from config import ModelConfig, SSDConfig, model_config_dict, checkpoint_model_config
+from config import SSDConfig, model_config_dict, checkpoint_model_config
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector
 from lstm_config import PairedConfig
-from routing.predictions import sha256_file
-from utils.checkpoints import model_from_checkpoint
 # Re-export shared helpers so existing checkpoint imports remain valid.
 from utils.runtime import (load_checkpoint, atomic_save_checkpoint, epoch_checkpoint_path,
                            write_json, run_lock, save_training_payload)
@@ -60,106 +57,11 @@ def paired_from_payload(payload, expected_stage=None):
     return model
 
 
-def initialize_joint_detector(big_path, config, fast_init="timm", fast_path=None,
-                    init_source="standalone_detection", model_config=None,
-                    backbone_weights=None, random_backbones=False):
-    if init_source == "joint_pretrain":
-        from utils.joint_initialization import load_classification
-        classifier, payload = load_classification(big_path)
-        model = JointLSTMDetector(LSTMSSD(classifier.model_cfg), config)
-        classifier.transfer_to_detector(model)
-        return model, payload, {"initialization": "joint_pretrain",
-                               "big_checkpoint_sha256": sha256_file(big_path),
-                               "classification_epoch": payload['epoch']}
-    if init_source == "fresh":
-        if big_path or fast_path:
-            raise ValueError("Fresh initialization does not take detector checkpoints.")
-        from utils.joint_initialization import initialize_backbones
-        model = JointLSTMDetector(LSTMSSD(model_config or ModelConfig()), config)
-        source = initialize_backbones(model.big.backbone, model.fast_backbone, backbone_weights, random_backbones)
-        return model, {}, {"initialization": "fresh", "backbones": source}
-    if init_source != "standalone_detection":
-        raise ValueError("Unknown joint initialization source.")
-    payload = load_checkpoint(big_path)
-    if payload.get("stage") != "stage2" or payload.get("validation_pending"):
-        raise ValueError("standalone_detection initialization requires a native stage2 checkpoint with completed validation.")
-    model = JointLSTMDetector(model_from_checkpoint(payload), config)
-    source = {"big_checkpoint_sha256": sha256_file(big_path),
-              "big_checkpoint_epoch": payload.get("epoch"), "fast_initialization": fast_init}
-    is_timm = model.model_cfg.backbone == "timm_mobilenet_v2"
-    if is_timm and fast_init not in ("timm", "standalone", "checkpoint", "random"):
-        raise ValueError("Unsupported timm small initialization.")
-    if fast_init == "timm":
-        if not is_timm or fast_path:
-            raise ValueError("timm initialization requires a timm big checkpoint and no fast checkpoint.")
-        source["fast_pretrained"] = model.fast_backbone.load_pretrained()
-    elif fast_init == "checkpoint":
-        if not fast_path:
-            raise ValueError("--fast-init checkpoint requires --fast-checkpoint.")
-        weights = load_checkpoint(fast_path)
-        if isinstance(weights, dict) and "state_dict" in weights:
-            weights = weights["state_dict"]
-        if not isinstance(weights, dict) or not all(isinstance(v, torch.Tensor) for v in weights.values()):
-            raise ValueError("Fast checkpoint must contain a matching backbone state_dict only.")
-        model.fast_backbone.load_state_dict(weights, strict=True)
-        source["fast_checkpoint_sha256"] = sha256_file(fast_path)
-    elif fast_init == "standalone":
-        if not fast_path:
-            raise ValueError("--fast-init standalone requires --fast-checkpoint.")
-        weights = load_checkpoint(fast_path)
-        if weights.get("validation_pending"):
-            raise ValueError("Complete standalone validation before transferring its backbone.")
-        native = model_from_checkpoint(weights)  # validates the entire source strictly
-        if (native.model_cfg.width_mult != config.fast_width_mult or
-                native.model_cfg.image_size not in (160, 320) or
-                native.model_cfg.backbone != model.model_cfg.backbone):
-            raise ValueError("Standalone family/width must match the small branch; resolution must be 160 or legacy 320.")
-        for key in ("category_id_to_label", "label_to_name"):
-            if weights.get(key) != payload.get(key):
-                raise ValueError("Standalone and big checkpoint class definitions differ.")
-        model.fast_backbone.load_state_dict(native.backbone.state_dict(), strict=True)
-        source.update({"fast_checkpoint_sha256": sha256_file(fast_path),
-                       "fast_checkpoint_epoch": weights.get("epoch"),
-                       "fast_checkpoint_stage": weights["stage"],
-                       "fast_transfer": {"components": ["backbone"],
-                                         "source_input_size": native.model_cfg.image_size,
-                                         "target_input_size": config.fast_image_size,
-                                         "source_output_stride": 32,
-                                         "target_output_stride": 16}})
-    elif fast_init != "random" or fast_path:
-        raise ValueError("Unknown or inconsistent fast initialization.")
-    source["small_projection_initialization"] = "identity; 1280 channels" if is_timm else "random; trained during joint fine-tuning"
-    return model, payload, source
-
-
 def load_joint_detector(path, expected_stage=None):
     payload = load_checkpoint(path)
     return paired_from_payload(payload, expected_stage), payload
 
 
-def finish_validation(payload, metrics, destination):
-    if not payload.get("validation_pending"):
-        raise ValueError("No pending validation to finish.")
-    current = float(metrics["mAP@0.5"])
-    best_path = Path(destination).with_name(Path(destination).stem + "_best" + (Path(destination).suffix or ".pt"))
-    known = payload.get("best_map50")
-    if best_path.exists():
-        stored = load_checkpoint(best_path)
-        if stored.get("run_id") != payload["run_id"]:
-            raise FileExistsError("Best checkpoint belongs to another run.")
-        if known is None or stored["best_map50"] > known:
-            known = stored["best_map50"]
-    improved = known is None or current > known
-    payload.update(validation_pending=False, validation_metrics=metrics,
-                   best_map50=current if improved else known)
-    payload.pop("validation_error", None)
-    if improved:
-        atomic_save_checkpoint(payload, best_path)
-    save_training_payload(payload, destination)
-    return payload
-
-
 # Preserve existing imports; serialized checkpoint keys remain unchanged.
 paired_metadata = lstm_metadata
-initialize_pair = initialize_joint_detector
 load_pair = load_joint_detector

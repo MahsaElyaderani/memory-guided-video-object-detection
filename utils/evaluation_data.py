@@ -1,4 +1,6 @@
-"""Frame loading, target normalization and detection export for current VID evaluation."""
+"""Frame selection, loading, target normalization, and detection export for VID evaluation."""
+import random
+
 import torch
 from PIL import Image
 
@@ -39,3 +41,31 @@ def raw_detection_row(record, target, prediction, names):
                              for box, label, score in zip(prediction['boxes'].tolist(), prediction['labels'].tolist(), prediction['scores'].tolist())],
             'ground_truth': [{'dataset_label': int(label), 'class_name': names[int(label)], 'box_xyxy_normalized': box}
                              for box, label in zip(target['boxes'].tolist(), target['labels'].tolist())]}
+
+
+def select_evaluation_frames(dataset, frames_per_video=None, seed=0):
+    """Optionally select consecutive frames, then refresh their image-ID lookup."""
+    if frames_per_video is not None:
+        if frames_per_video < 1 or dataset.clip_length != 1:
+            raise ValueError("Positive frame cap and single-frame evaluation dataset required.")
+        rng = random.Random(seed)
+        for video_id in dataset.video_ids:
+            records = dataset.images_by_video[video_id]
+            # Match native training: short videos consume no RNG draw; only consecutive windows qualify.
+            if len(records) < frames_per_video:
+                continue
+            starts = []
+            for start in range(len(records) - frames_per_video + 1):
+                window = records[start:start + frames_per_video]
+                ids = [int(record['frame_id']) for record in window if 'frame_id' in record]
+                if len(ids) == len(window) and all(b == a + 1 for a, b in zip(ids, ids[1:])):
+                    starts.append(start)
+            if not starts:
+                raise ValueError(f"Video {video_id} has no {frames_per_video}-frame consecutive segment.")
+            start = rng.choice(starts)
+            dataset.images_by_video[video_id] = records[start:start + frames_per_video]
+        dataset.clip_index = [(v, index) for v in dataset.video_ids
+                              for index in range(len(dataset.images_by_video[v]))]
+        dataset.paired_frames_per_video = frames_per_video
+    dataset.routing_records = {int(r["id"]): r for v in dataset.video_ids for r in dataset.images_by_video[v]}
+    return dataset

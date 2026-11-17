@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterator, List, Sequence, Tuple
@@ -11,7 +12,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 from PIL import Image
 
-from .transforms import ClassificationTransform, EvalTransform, Target
+from .transforms import ClassificationTransform, EvalTransform, Target, TrainTransform, resize_detection_views
 
 
 class DetectionDataset(Dataset):
@@ -192,3 +193,23 @@ class ClassificationDataset(torch.utils.data.Dataset):
         target = torch.zeros(30, dtype=torch.float32)
         target[labels.unique() - 1] = 1.
         return frames[0], target
+
+
+class TrainingPairs(torch.utils.data.Dataset):
+    def __init__(self, dataset, student_frames=6):
+        self.dataset = dataset
+        self.student_frames = student_frames
+        self.transform = TrainTransform(160, interpolation='bicubic')
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        video, start = self.dataset.clip_index[index]
+        records = self.dataset.images_by_video[video]
+        # Retain the original RNG draw when resuming a one-frame checkpoint.
+        offsets = ([random.randint(1, 9)] if self.student_frames == 1 else
+                   sorted(random.sample(range(1, 10), self.student_frames)))
+        pair = [self.dataset._load_image_and_target(records[start + t]) for t in [0, *offsets]]
+        images, targets = self.transform.augment(*zip(*pair))
+        return images[0], torch.stack([resize_detection_views(im, 160, 'bicubic') for im in images[1:]]), targets[1:]

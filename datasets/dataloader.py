@@ -21,6 +21,11 @@ def classification_collate(batch):
     return stack_frames(images), torch.stack(labels)
 
 
+def collate_pairs(batch):
+    keys, current, targets = zip(*batch)
+    return list(keys), torch.stack(current), list(targets)
+
+
 def video_collate_fn(batch: Sequence[Tuple[Tensor, list[dict]]]):
     """Collate fixed-length video clips while preserving ragged GT boxes."""
     if not batch:

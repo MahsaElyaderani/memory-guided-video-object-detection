@@ -28,7 +28,9 @@ import numpy as np
 import torch
 from path import VAL_ANNOTATIONS, VAL_FRAMES
 from engine.evaluator import compute_map50
-from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames, refresh_records
+from engine.trainer_lstm import EvaluationOptions
+from engine.evaluator import export_lstm_run
+from utils.evaluation_data import select_evaluation_frames
 from evaluate_lstm_models import load_evaluation_model
 from lstm_config import PolicyConfig
 from routing.data import selected_dataset, validate_native_categories, guard_held_out
@@ -66,7 +68,7 @@ def load_manifest(args):
         grouped[frame['video_id']].append(dataset.routing_records[frame['image_id']])
     dataset.video_ids = list(grouped)
     dataset.images_by_video = dict(grouped)
-    refresh_records(dataset)
+    select_evaluation_frames(dataset)
     for records in grouped.values():
         if any(b['frame_id'] != a['frame_id'] + 1 for a, b in zip(records, records[1:])):
             raise ValueError('Each manifest video must be one consecutive segment.')

@@ -10,14 +10,19 @@ root, activate the `vision` Conda environment, and use CUDA. Select the launcher
 `train` action to start training or resume its latest checkpoints.
 
 For code review, follow the launcher → entry point → model → shared utilities:
+Entry points prepare models, data, and optimizers; the trainers coordinate training,
+validation, and checkpoints. LSTM classification uses the shared classification loop.
+LSTM training supports linear and cosine LR schedules; direct commands default to
+linear for classification and cosine for detection.
 
 | Responsibility | Main files |
 | --- | --- |
-| LSTM training and classification pretraining | `train_lstm_models.py`, `engine/classification_training.py`, `engine/lstm_training.py` |
+| LSTM training and classification pretraining | `train_lstm_models.py`, `engine/classification_training.py`, `engine/trainer_lstm.py` |
 | LSTM architecture | `models/classification_pretraining.py`, `models/joint_lstm_detector.py`, `models/lstm_ssd_detector.py` |
-| Attention training and evaluation | `train_attention_models.py`, `engine/attention.py`, `models/attention_memory_detector.py`, `models/frozen_efficientdet_teacher.py` |
+| Attention training and evaluation | `train_attention_models.py`, `engine/trainer_attention.py`, `models/attention_memory_detector.py`, `models/frozen_efficientdet_teacher.py` |
 | Shared feature extraction and detection | `models/backbones.py`, `models/ssd_head.py`, `losses/multibox_loss.py`, `engine/evaluator.py` |
-| LSTM evaluation | `evaluate_lstm_models.py`, `engine/lstm_evaluation.py` |
+| LSTM evaluation | `evaluate_lstm_models.py`, `engine/trainer_lstm.py` |
+| Prediction saving and video export | `engine/evaluator.py` |
 | Data, settings, and resume | `datasets/`, `path.py`, `config.py`, `lstm_config.py`, `utils/resume.py`, `utils/runtime.py` |
 
 | Models | Launcher | Selection | Training |
@@ -50,6 +55,9 @@ OmegaConf, and pycocotools are also required.
 | Validation frequency | Every 5,000 updates and at budget completion | Every 5,000 updates and at budget completion |
 
 Resume uses latest checkpoints; keep the saved training settings unchanged.
+Fresh attention runs sample six distinct student frames after the keyframe in each
+10-frame window. They reuse one frozen teacher P4 cache and average the six detection
+losses per update. Older checkpoints resume their saved one-frame protocol.
 LSTM launchers print the selected run folders; `RUN_NAME` selects an explicit run.
 Attention runs are stored under `RUNS_DIR/p4_student_imagenet_no_projection/{no_memory,attention_memory}`.
 The launcher accepts only `train`, `eval`, or `all`; both variants use the same

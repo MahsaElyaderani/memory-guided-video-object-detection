@@ -1,6 +1,8 @@
 """Entry point for standalone and joint LSTM experiments: classification pretraining and detection training."""
 import argparse
 from copy import copy
+from dataclasses import asdict
+from types import SimpleNamespace
 from pathlib import Path
 import math
 import random
@@ -9,23 +11,20 @@ import uuid
 import torch
 from torch import nn
 from datasets.dataset_imagenetvid import ClassificationDataset
-from datasets.dataloader import budget_loader
-from engine.lstm_training import (add_training_arguments, build_training_data, make_loader,
-                                   train_detector_epoch)
-from losses.multibox_loss import criterion_for
-from engine.lstm_evaluation import evaluate_lstm, EvaluationOptions
+from engine import trainer_lstm as trainer
 from models.classification_pretraining import JointClassifier
 from models.lstm_ssd_detector import LSTMSSD
 from models.joint_lstm_detector import JointLSTMDetector
 from models.ssd_head import SSDFeatureMaps, SSDBoxPredictor
-from lstm_config import PairedConfig, PolicyConfig
+from lstm_config import PairedConfig
 from path import parse_paths, RUNS_DIR
-from routing.data import data_signature, guard_held_out
-from engine.classification_training import classification_epoch
-from utils.checkpoints import capture_rng, restore_rng
+from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
+from datasets.transforms import TrainTransform
+from utils.evaluation_data import select_evaluation_frames
+from utils.checkpoints import restore_rng
 from utils.joint_initialization import make_joint_config
 from utils.lstm_checkpoints import lstm_metadata
-from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint, early_stopping_reached
+from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint
 from routing.predictions import sha256_file
 from utils.resume import resume_defaults, saved_arguments, restore_optimizer
 
@@ -110,13 +109,39 @@ def model_from_matched(payload):
 
 
 def parse_args(argv=None):
+    from routing.data import add_data_arguments
     parser = argparse.ArgumentParser(description=__doc__)
-    add_training_arguments(parser)
-    next(a for a in parser._actions if a.dest == 'checkpoint_out').required = False
-    parser.set_defaults(clip_length=6, clip_stride=6, batch_size=2, val_frames_per_video=20)
+    add_data_arguments(parser)
+    parser.add_argument("--val-annotations")
+    parser.add_argument("--val-frames-root")
+    parser.add_argument("--val-video-ids")
+    parser.add_argument("--max-val-videos", type=int)
+    parser.add_argument("--val-frames-per-video", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--clip-length", type=int, default=6)
+    parser.add_argument("--clip-stride", type=int, default=6)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--prefetch-factor", type=int, default=1)
+    parser.add_argument("--sharing-strategy", choices=("file_descriptor", "file_system"),
+                        help="CPU tensor transfer strategy; file_system avoids per-storage cached file descriptors.")
+    parser.add_argument("--max-batches", type=int)
+    parser.add_argument("--learning-rate", type=float)
+    parser.add_argument("--grad-clip", type=float, default=10.)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--big-call-interval", type=int, default=8,
+                        help="Call the big backbone every N frames during fixed-policy validation; not validation frequency.")
+    parser.add_argument("--validation-interval", dest="big_call_interval", type=int,
+                        default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    parser.add_argument("--checkpoint-out")
+    parser.add_argument("--resume")
+    parser.add_argument("--no-progress", action="store_true")
+    parser.add_argument("--log-every", type=int, default=50,
+                        help="Print a persistent loss line every N detector batches, plus first batch and epoch mean.")
     parser.add_argument('--task', choices=('classification', 'detection'), required=True)
     parser.add_argument('--experiment', choices=tuple(EXPERIMENTS), required=True)
-    parser.add_argument('--lr-schedule', choices=('constant', 'linear', 'cosine'), default='constant')
+    parser.add_argument('--lr-schedule', choices=('linear', 'cosine'), help='Defaults to linear for classification and cosine for detection.')
     parser.add_argument('--validate-every', type=int, default=5000, help='Budgeted validation interval in optimizer updates.')
     parser.add_argument('--early-stopping', action=argparse.BooleanOptionalAction, default=None,
                         help='Stop after 10 validations without improvement; resume inherits the saved setting')
@@ -125,7 +150,11 @@ def parse_args(argv=None):
     parser.add_argument('--init-checkpoint')
     parser.add_argument('--expand-subset', action='store_true',
                         help='Continue joint cosine detection on a larger subset in a fresh output directory.')
-    args = resume_defaults(parser, parse_paths(parser, 'train_matched', argv), argv)
+    args = parse_paths(parser, 'train_matched', argv)
+    args.lr_schedule = args.lr_schedule or ('linear' if args.task == 'classification' else 'cosine')
+    args = resume_defaults(parser, args, argv)
+    if args.lr_schedule not in ('linear', 'cosine'):
+        parser.error('Constant-LR training is retired; use linear or cosine for a new run.')
     if args.validate_every < 1:
         parser.error('validate-every must be positive')
     if args.steps < 1 or args.learning_rate is not None and (not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
@@ -168,77 +197,6 @@ def save_matched_checkpoints(payload, destination, select_best=True):
     atomic_save_checkpoint(payload, destination)
 
 
-def train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping=False):
-    batches = min(len(train_data) // args.batch_size, args.max_batches or len(train_data))
-    budget = {'epochs': args.epochs, 'total_updates': args.epochs * batches,
-              'updates': 0, 'epoch': 1, 'batch': 0, 'sampling_version': 1}
-    if resume:
-        saved = resume.get('budget')
-        if saved and 'origin_updates' in saved:
-            if saved['batches_per_epoch'] != batches:
-                raise ValueError('Continuation dataset/batch count changed on resume.')
-            budget['total_updates'] = saved['total_updates']
-        if not saved or any(saved[k] != budget[k] for k in ('epochs', 'total_updates', 'sampling_version')):
-            raise ValueError('A budgeted schedule requires the original predetermined budget on resume.')
-        budget.update(saved)
-        if (not 0 <= budget['batch'] <= batches or
-                budget['updates'] != budget.get('origin_updates', 0) +
-                (budget['epoch'] - budget.get('origin_epoch', 1)) * batches + budget['batch'] or
-                not 0 <= budget['updates'] <= budget['total_updates']):
-            raise ValueError('Checkpoint batch position and completed update count disagree.')
-        if args.learning_rate is not None and any(args.learning_rate != lr for lr in resume['scheduler']['base_lrs']):
-            raise ValueError('Changing the initial LR would change the fixed-budget schedule; use a new run.')
-    if args.lr_schedule == 'cosine':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=budget['total_updates'])
-    else:
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,
-            lambda step: max(0., 1. - step / budget['total_updates']))
-    if resume:
-        scheduler.load_state_dict(resume['scheduler'])
-        if scheduler.last_epoch != budget['updates']:
-            raise ValueError('Scheduler and completed update counts disagree.')
-        for group, lr in zip(optimizer.param_groups, scheduler.get_last_lr()):
-            group['lr'] = lr
-    print(f"Budget: {budget['updates']}/{budget['total_updates']} updates; {args.lr_schedule} LR, no warmup.", flush=True)
-    if budget['updates'] >= budget['total_updates']:
-        return resume
-    if resume and early_stopping_reached(resume, early_stopping, args.checkpoint_out):
-        return resume
-    # Step only after a successful optimizer update, including inside the reused loops.
-    hook = optimizer.register_step_post_hook(lambda *_: scheduler.step())
-    loop_args = copy(args)
-    loop_args.max_batches = None  # The sliced loader already enforces the update budget.
-    payload = resume
-    try:
-        while budget['updates'] < budget['total_updates']:
-            if budget['batch'] == batches:
-                budget['epoch'] += 1
-                budget['batch'] = 0
-            if budget['batch'] == 0:
-                seed_training(args.seed + budget['epoch'])
-            count = min(batches - budget['batch'], budget['total_updates'] - budget['updates'],
-                        args.validate_every - budget['updates'] % args.validate_every)
-            loader = budget_loader(train_data, args, budget['epoch'], budget['batch'], count)
-            if args.task == 'classification':
-                stats = classification_epoch(model, train_data, loop_args, optimizer, loader=loader)
-            else:
-                stats = train_detector_epoch(model, loader, optimizer, criterion_for(model), loop_args, budget['epoch'])
-                if model.standalone:
-                    stats.pop('big_selections')
-            if scheduler.last_epoch != budget['updates'] + count:
-                raise RuntimeError('Budgeted training must perform one optimizer update per consumed batch.')
-            budget['updates'] += count
-            budget['batch'] += count
-            validate = budget['updates'] % args.validate_every == 0 or budget['updates'] == budget['total_updates']
-            stats['interval_updates'] = count
-            payload = checkpoint(budget['epoch'], stats, dict(budget), scheduler.state_dict(), validate)
-            if validate and early_stopping_reached(payload, early_stopping):
-                break
-    finally:
-        hook.remove()
-    return payload
-
-
 def expand_subset_checkpoint(resume, definition, signatures, args):
     """Fork a detector's training state; only the dataset and sampling position change."""
     if (not resume or args.task != 'detection' or not args.experiment.startswith('joint_') or
@@ -277,10 +235,43 @@ def expand_subset_checkpoint(resume, definition, signatures, args):
                        'origin_updates': saved['updates']}}
 
 
+def build_training_data(args, model, metadata):
+    if (min(args.epochs, args.batch_size, args.clip_length, args.clip_stride, args.prefetch_factor,
+            args.big_call_interval) < 1 or args.num_workers < 0 or
+            args.max_batches is not None and args.max_batches < 1 or
+            not math.isfinite(args.grad_clip) or args.grad_clip <= 0):
+        raise ValueError("Invalid training controls.")
+    if bool(args.val_annotations) != bool(args.val_frames_root):
+        raise ValueError("Supply both validation annotations and frames root.")
+    print(f"Loading training annotations and indexing clips: {args.annotations}", flush=True)
+    train = selected_dataset(args, model.model_cfg.image_size, args.clip_length, args.clip_stride, interpolation=model.model_cfg.input_interpolation, paired=model.model_cfg.uses_timm)
+    print(f"Training index ready: {len(train.video_ids)} videos, {len(train)} clips.", flush=True)
+    train.transform = TrainTransform(model.model_cfg.image_size, interpolation=model.model_cfg.input_interpolation,
+                                     paired=model.model_cfg.uses_timm)
+    if not metadata:
+        metadata.update(category_id_to_label=train.category_id_to_label, label_to_name=train.label_to_name,
+                        ssd_config=asdict(model.ssd_cfg))
+    validate_native_categories(metadata, train)
+    if len(train) < args.batch_size:
+        raise ValueError("Training selection has fewer complete clips than a full batch.")
+    val = None
+    if args.val_annotations:
+        print(f"Loading validation annotations: {args.val_annotations}", flush=True)
+        val_args = SimpleNamespace(annotations=args.val_annotations, frames_root=args.val_frames_root,
+                                   video_ids=args.val_video_ids, max_videos=args.max_val_videos, subset_seed=args.subset_seed)
+        val = selected_dataset(val_args, model.model_cfg.image_size, interpolation=model.model_cfg.input_interpolation, paired=model.model_cfg.uses_timm)
+        select_evaluation_frames(val, args.val_frames_per_video, args.subset_seed)
+        validate_native_categories(metadata, val)
+        guard_held_out([data_signature(train)], val)
+    return train, val
+
+
 def train(args):
     requested_stop = vars(args).pop('early_stopping', None)
     expanding = vars(args).pop('expand_subset', False)  # One-time action, never inherited on resume.
     resume = load_checkpoint(args.resume) if args.resume else None
+    if resume and not resume.get('budget'):
+        raise ValueError('Constant-LR resume is retired; use the archived trainer. Checkpoint evaluation remains supported.')
     early_stopping = resume.get('early_stopping', False) if resume and requested_stop is None else bool(requested_stop)
     source = load_checkpoint(args.init_checkpoint) if args.init_checkpoint and not resume else None
     if resume and (resume['experiment'] != args.experiment or resume['stage'] != 'matched_' + args.task):
@@ -311,9 +302,6 @@ def train(args):
                   'training': {k: v for k, v in own_signature.items() if k != 'video_directories'},
                   'validation': {k: v for k, v in data_signature(val_data).items() if k != 'video_directories'},
                   'num_workers': args.num_workers}
-    if args.lr_schedule == 'constant':
-        definition['arguments'].pop('lr_schedule')
-        definition['arguments'].pop('validate_every')
     if expanding:
         resume = expand_subset_checkpoint(resume, definition, signatures, args)
         resume['budget']['batches_per_epoch'] = min(len(train_data) // args.batch_size,
@@ -353,83 +341,17 @@ def train(args):
         restore_optimizer(optimizer, resume['optimizer'], args.learning_rate)
         restore_rng(resume['rng_state'])
         sources, signatures = resume['sources'], resume['training_signatures']
-    start = resume['epoch'] if resume else 0
-    if args.lr_schedule == 'constant' and start >= args.epochs:
-        print('Epoch target already reached; no training required.')
-        return resume
-    history, run_id = (list(resume['history']), resume['run_id']) if resume else ([], uuid.uuid4().hex)
     if args.task == 'classification':
         train_data = ClassificationDataset(train_data, model.model_cfg.backbone, True)
         val_data = ClassificationDataset(val_data, model.model_cfg.backbone, False)
 
-    def checkpoint(epoch, stats, budget=None, scheduler=None, validate=True):
-        rng = capture_rng()
-        was_training = model.training
-        metrics = None
-        if validate:
-            try:
-                seed_training(0)
-                if args.task == 'classification':
-                    val_args = copy(args)
-                    val_args.max_batches = None
-                    metrics = classification_epoch(model, val_data, val_args)
-                else:
-                    policy = PolicyConfig(mode='big' if model.standalone else 'fixed', interval=args.big_call_interval)
-                    metrics, _ = evaluate_lstm(model, val_data, policy,
-                        EvaluationOptions(args.device, score_threshold=0. if budget else .001,
-                                          warmup_frames=0, progress=not args.no_progress))
-            finally:
-                restore_rng(rng)
-                model.train(was_training)
-        if validate:
-            history.append({'epoch': epoch, 'train': stats, 'validation': metrics,
-                            **({'update': budget['updates']} if budget else {})})
-        payload = {**lstm_metadata(model), 'matched_format_version': 1, 'stage': 'matched_' + args.task,
-                   'experiment': args.experiment, 'initialization_seed': args.seed,
-                   'protocol': {'bn_stats': 'frozen', 'standalone_memory': 'update', 'joint_memory': 'big_only'},
-                   'class_to_idx': {str(i): i - 1 for i in range(1, 31)},
-                   'category_id_to_label': metadata['category_id_to_label'], 'label_to_name': metadata['label_to_name'],
-                   'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'rng_state': capture_rng(),
-                   'selection_metric': (resume.get('selection_metric', 'bce_loss' if args.task == 'classification' else 'mAP@0.5')
-                                        if resume else 'micro_ap' if args.task == 'classification' else 'mAP@0.5'),
-                   'epoch': epoch, 'run_id': run_id, 'history': history, 'sources': sources,
-                   'training_signatures': signatures, 'run_definition': definition,
-                   'resume_arguments': saved_arguments(args)}
-        if args.task == 'classification' and model.backbone_only:
-            payload['classification_architecture'] = 'backbone_only'
-        if budget:
-            payload.update(budget=budget, scheduler=scheduler, global_step=budget['updates'])
-        if early_stopping:
-            payload['early_stopping'] = True
-        save_matched_checkpoints(payload, destination, select_best=validate)
-        suffix = f" update {budget['updates']}" if budget else ''
-        print(f'Saved {args.experiment} {args.task} epoch {epoch}{suffix}: {destination}', flush=True)
-        if metrics:
-            key = payload['selection_metric']
-            print(f"Validation {key}={metrics[key]:.6f}; class coverage {len(metrics['present_classes'])}/30", flush=True)
-        return payload
-
-    if args.lr_schedule in ('linear', 'cosine'):
-        if expanding:
-            # Keep the source best as the baseline even if every new validation is worse.
-            atomic_save_checkpoint(resume, best_path, overwrite=False)
-            atomic_save_checkpoint(resume, destination, overwrite=False)
-        return train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping)
-    if early_stopping_reached(resume, early_stopping, destination):
-        return resume
-    for epoch in range(start + 1, args.epochs + 1):
-        # Identical sampling/augmentation streams across architectures; exact epoch-boundary resume.
-        seed_training(args.seed + epoch)
-        if args.task == 'classification':
-            stats = classification_epoch(model, train_data, args, optimizer)
-        else:
-            stats = train_detector_epoch(model, make_loader(train_data, args), optimizer, criterion_for(model), args, epoch)
-            if model.standalone:
-                stats.pop('big_selections')  # The random schedule is consumed for reproducibility, but unused.
-        payload = checkpoint(epoch, stats)
-        if early_stopping_reached(payload, early_stopping):
-            break
-    return payload
+    if expanding:
+        # Keep the source best as the baseline even if every new validation is worse.
+        atomic_save_checkpoint(resume, best_path, overwrite=False)
+        atomic_save_checkpoint(resume, destination, overwrite=False)
+    return trainer.train(model, train_data, val_data, optimizer, args, resume=resume,
+                         metadata=metadata, sources=sources, signatures=signatures,
+                         definition=definition, early_stopping=early_stopping)
 
 
 if __name__ == '__main__':

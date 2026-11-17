@@ -55,8 +55,8 @@ class PolicyConfig:
             raise ValueError("Invalid mode or interval.")
         if self.scene_change_threshold is not None:
             probability(self.scene_change_threshold, "Scene-change threshold")
-        if self.memory_feedback not in ("clean", "none", "corrupted"):
-            raise ValueError("memory_feedback must be clean, none or corrupted.")
+        if self.memory_feedback not in ("clean", "none"):
+            raise ValueError("memory_feedback must be clean or none.")
 
 
 def config_dict(config):

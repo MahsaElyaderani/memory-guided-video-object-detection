@@ -1,4 +1,4 @@
-"""Reusable evaluation utilities for detection postprocessing, AP metrics, and classification metrics."""
+"""Reusable evaluation utilities for detection postprocessing, AP metrics, classification metrics, and prediction exports."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -202,3 +202,99 @@ def compute_map50(
     map50 = float(sum(ap_per_class.values()) / len(ap_per_class)) if ap_per_class else 0.0
     return {"mAP@0.5": map50, "AP@0.5_per_class": ap_per_class, "evaluated_classes": len(ap_per_class),
             **class_coverage(gt_counts[1:])}
+
+
+def export_lstm_run(model, dataset, policy, options, output_dir,
+                      precision_ids=None, visual_options=None):
+    import json
+    from pathlib import Path
+    from engine.trainer_lstm import evaluate
+    from utils.evaluation_data import raw_detection_row
+    from utils.runtime import write_json
+    from dataclasses import asdict
+    from engine.visualizer import DetectionVideoExporter
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=False)
+    write_json({"status": "running"}, output / "run_status.json")
+    exporter = DetectionVideoExporter(dataset, output, policy.mode, **visual_options) if visual_options else None
+    try:
+        with (output / "detections.jsonl").open("x") as detections, (output / "routing.jsonl").open("x") as routing:
+            def save(record, target, prediction, route):
+                row = raw_detection_row(record, target, prediction, dataset.label_to_name)
+                row["route"] = route
+                detections.write(json.dumps(row, allow_nan=False) + "\n")
+                routing.write(json.dumps(route, allow_nan=False) + "\n")
+                if exporter:
+                    exporter(record, target, prediction, route)
+            metrics, _ = evaluate(model, dataset, policy, options, precision_ids, save)
+        if exporter:
+            exporter.close()
+            write_json({"videos": exporter.video_index}, output / "videos_index.json")
+        metrics.update(policy=asdict(policy))
+        write_json(metrics, output / "metrics.json")
+        write_json({"status": "complete", "num_frames": metrics["num_frames"]}, output / "run_status.json")
+        return metrics
+    except BaseException as error:
+        if exporter:
+            exporter.close()
+        write_json({"status": "failed", "error": str(error)}, output / "run_status.json")
+        raise
+
+
+def export_evaluation(student, teacher, selection, dataset, device, output, visuals=False):
+    from collections import Counter
+    import json
+    from engine.trainer_attention import evaluate
+    from engine.visualizer import DetectionVideoExporter
+    from utils.evaluation_data import normalized_target, raw_detection_row
+    from utils.runtime import write_json, ATTENTION_MEMORY_NAMES
+
+    output.mkdir(parents=True, exist_ok=False)
+    write_json({'status': 'running'}, output/'run_status.json')
+    exporter = None
+    try:
+        if visuals:
+            exporter = DetectionVideoExporter(dataset, output, ATTENTION_MEMORY_NAMES[student.memory], save_frames_every=1)
+        write_json(selection, output/'selection.json')
+        with (output/'detections.jsonl').open('x') as stream:
+            def save(frame, rows, step):
+                # Match score_predictions: discard degenerate boxes, retain top 100 per frame.
+                rows = sorted((r for r in rows if r['bbox'][2] > 0 and r['bbox'][3] > 0),
+                              key=lambda r: r['score'], reverse=True)[:100]
+                width, height = frame['original_size']
+                boxes = torch.tensor([r['bbox'] for r in rows], dtype=torch.float64).reshape(-1, 4)
+                boxes[:, 2:] += boxes[:, :2]
+                pred = dict(boxes=boxes/boxes.new_tensor([width, height, width, height]),
+                            labels=torch.tensor([r['category_id'] for r in rows], dtype=torch.long),
+                            scores=torch.tensor([r['score'] for r in rows], dtype=torch.float64))
+                record = dataset.routing_records[frame['image_id']]
+                target = normalized_target(dataset, record)
+                route = dict(selected_model='teacher' if step % 10 == 0 else 'student_' + ATTENTION_MEMORY_NAMES[student.memory],
+                             previous_contribution_age=step % 10)
+                row = raw_detection_row(record, target, pred, dataset.label_to_name)
+                row.update(route=route, coco_predictions=rows)
+                stream.write(json.dumps(row, allow_nan=False) + '\n')
+                if exporter:
+                    exporter(record, target, pred, route)
+            metrics = evaluate(student, teacher, selection, dataset, device, save)
+        if exporter:
+            exporter.close()
+            write_json({'videos': exporter.video_index}, output/'videos_index.json')
+        sequence = metrics['sequence']
+        counts = dict(Counter(f['video_id'] for f in selection['frames']))
+        write_json({**metrics, 'mAP@0.5': sequence['continuous_AP50'],
+                    'AP@0.5_per_class': sequence['continuous_AP50_per_class'],
+                    'num_frames': sequence['frames'], 'video_ids': list(counts), 'frames_per_video': counts,
+                    'evaluated_image_ids': [f['image_id'] for f in selection['frames']],
+                    'class_names': dataset.label_to_name,
+                    'ground_truth_counts_per_class': sequence['positive_counts_per_class'],
+                    'score_threshold': 0., 'max_detections_per_class': 100, 'max_total_detections': 100,
+                    'nms_iou_threshold': {'student': student.ssd_cfg.nms_iou_threshold,
+                                          'teacher': 'checkpoint configuration'}}, output/'metrics.json')
+        write_json({'status': 'complete', 'num_frames': sequence['frames']}, output/'run_status.json')
+        return metrics
+    except BaseException as error:
+        if exporter:
+            exporter.close()
+        write_json({'status': 'failed', 'error': str(error)}, output/'run_status.json')
+        raise

@@ -8,8 +8,8 @@ import time
 
 import torch
 
-from engine.lstm_evaluation import EvaluationOptions, export_lstm_run, select_evaluation_frames
-from lstm_config import PolicyConfig, MemoryCorruption
+from engine.trainer_lstm import EvaluationOptions, export_lstm_run, select_evaluation_frames
+from lstm_config import PolicyConfig
 from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
 from utils.runtime import write_json, load_checkpoint
 from routing.predictions import sha256_file
@@ -70,10 +70,7 @@ def parse_args(argv=None):
     parser.add_argument("--scene-change-threshold", type=float)
     parser.add_argument("--keep-state-on-scene-change", action="store_true")
     parser.add_argument("--precision-image-ids", help="JSON list of image IDs forcing big calls in combined modes.")
-    parser.add_argument("--memory-feedback", choices=("clean", "none", "corrupted"), default="clean")
-    parser.add_argument("--memory-corruption-probability", type=float, default=1.)
-    parser.add_argument("--memory-dropout", type=float, default=.1)
-    parser.add_argument("--memory-noise-std", type=float, default=.1)
+    parser.add_argument("--memory-feedback", choices=("clean", "none"), default="clean")
     parser.add_argument("--frames-per-video", type=int, help="Consecutive segment cap; shorter videos stay complete.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -117,7 +114,6 @@ def main(argv=None):
             raise ValueError("Precision requests include unevaluated image IDs.")
     options = EvaluationOptions(args.device, args.score_threshold, args.max_detections, args.warmup_frames,
                                  args.seed, not args.no_progress, not args.no_losses)
-    corruption = MemoryCorruption(args.memory_corruption_probability, args.memory_dropout, args.memory_noise_std)
     modes = ("small", "big", "fixed") if args.mode == "all" else (args.mode,)
     policies = {mode: PolicyConfig(mode, args.interval,
                                    args.scene_change_threshold, not args.keep_state_on_scene_change,
@@ -140,7 +136,7 @@ def main(argv=None):
         for mode, policy in policies.items():
             name = f"fixed_k{args.interval}" if mode == "fixed" else mode
             results[name] = export_lstm_run(model, dataset,
-                                              policy, options, output / name, corruption,
+                                              policy, options, output / name,
                                               precision_ids if mode == "fixed" else None, visuals)
             results[name]["evaluation_source"] = provenance
             write_json(results[name], output / name / "metrics.json")

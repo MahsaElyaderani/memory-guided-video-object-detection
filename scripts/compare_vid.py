@@ -30,7 +30,7 @@ from utils.path import VAL_ANNOTATIONS, VAL_FRAMES
 from utils.metric import compute_map50
 from utils.metric import export_lstm_run
 from utils.evaluation_data import select_evaluation_frames
-from evaluate_lstm_models import load_evaluation_model
+from utils.checkpoint import load_evaluation_model
 from utils.config import LSTMPolicyConfig, LSTMEvalConfig
 from utils.evaluation_data import selected_dataset, validate_native_categories, guard_held_out
 from utils.runtime import sha256_file

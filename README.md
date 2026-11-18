@@ -21,11 +21,11 @@ linear for classification and cosine for detection.
 
 | Responsibility | Main files |
 | --- | --- |
-| LSTM training and classification pretraining | `train_lstm_models.py`, `engine/trainer_classification.py`, `engine/trainer_lstm.py` |
+| LSTM training and classification pretraining (`train` action) | `train_lstm_models.py`, `engine/trainer_classification.py`, `engine/trainer_lstm.py` |
 | LSTM architecture | `models/classifier.py`, `models/lstm_models.py` |
 | Attention training and evaluation | `train_attention_models.py`, `engine/trainer_attention.py`, `models/attention_models.py`, `models/efficientdet.py` |
 | Shared feature extraction and detection | `models/backbones.py`, `models/ssd_head.py`, `losses/multibox_loss.py`, `utils/metric.py` |
-| LSTM evaluation | `evaluate_lstm_models.py`, `engine/trainer_lstm.py` |
+| LSTM evaluation (`eval` action) | `train_lstm_models.py`, `engine/trainer_lstm.py` |
 | Prediction saving and video export | `utils/metric.py` |
 | Data, settings, and resume | `datasets/`, `utils/path.py`, `utils/config.py`, `utils/checkpoint.py`, `utils/runtime.py` |
 

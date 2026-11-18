@@ -37,7 +37,7 @@ for SETTING in big_only interval_2 interval_4 interval_8; do
     interval_*) MODE=fixed; INTERVAL="${SETTING#interval_}" ;;
   esac
   printf '\nEvaluating joint: %s\n' "$SETTING"
-  python -u evaluate_lstm_models.py \
+  python -u train_lstm_models.py eval \
     --checkpoint "$CHECKPOINT" \
     --mode "$MODE" --interval "$INTERVAL" \
     --max-videos 100 --frames-per-video 20 \

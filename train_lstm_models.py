@@ -1,5 +1,7 @@
-"""Entry point for standalone and joint LSTM experiments: classification pretraining and detection training."""
+"""Entry point for standalone and joint LSTM experiments: classification pretraining, detection training, and evaluation."""
 import argparse
+import json
+import sys
 from copy import copy
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -16,16 +18,49 @@ from utils.evaluation_data import data_signature, guard_held_out, selected_datas
 from datasets.transforms import TrainTransform
 from utils.evaluation_data import select_evaluation_frames
 from utils.checkpoint import restore_rng
-from utils.checkpoint import model_from_matched
+from utils.checkpoint import model_from_matched, load_evaluation_model
 from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint, seed_training
-from utils.runtime import sha256_file
+from utils.runtime import sha256_file, write_json
+from utils.config import LSTMPolicyConfig, LSTMEvalConfig
+from utils.metric import export_lstm_run, benchmark_backbones
 from utils.checkpoint import resume_defaults, saved_arguments, restore_optimizer
 
-def parse_args(argv=None):
-    """Parse stage and experiment options, inject configured paths, and restore omitted resume defaults."""
+def parse_args(argv=None, *, action="train"):
+    """Parse options for one action without adding the action to saved experiment settings."""
     from utils.evaluation_data import add_data_arguments
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(prog=f"{Path(sys.argv[0]).name} {action}", description=__doc__)
+    if action not in ("train", "eval"):
+        parser.error("Choose train or eval.")
     add_data_arguments(parser)
+    if action == "eval":
+        parser.add_argument("--checkpoint", required=True)
+        parser.add_argument("--mode", choices=("all", "small", "big", "fixed"), default="all")
+        parser.add_argument("--interval", type=int, default=8)
+        parser.add_argument("--scene-change-threshold", type=float)
+        parser.add_argument("--keep-state-on-scene-change", action="store_true")
+        parser.add_argument("--precision-image-ids", help="JSON list of image IDs forcing big calls in combined modes.")
+        parser.add_argument("--memory-feedback", choices=("clean", "none"), default="clean")
+        parser.add_argument("--frames-per-video", type=int, help="Consecutive segment cap; shorter videos stay complete.")
+        parser.add_argument("--seed", type=int, default=0)
+        parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+        parser.add_argument("--score-threshold", type=float, default=.001)
+        parser.add_argument("--max-detections", type=int, default=100)
+        parser.add_argument("--warmup-frames", type=int, default=3)
+        parser.add_argument("--backbone-benchmark-steps", type=int, default=0,
+                            help="Optional batch-1 backbone timing iterations after evaluation; 0 disables.")
+        parser.add_argument("--output-dir", required=True)
+        parser.add_argument("--no-visuals", action="store_true")
+        parser.add_argument("--draw-score-threshold", type=float, default=.3)
+        parser.add_argument("--save-frames-every", type=int, default=30)
+        parser.add_argument("--max-side", type=int, default=640)
+        parser.add_argument("--playback-fps", type=float, default=30.)
+        parser.add_argument("--no-progress", action="store_true")
+        parser.add_argument("--no-losses", action="store_true", help="Skip reported GT losses; AP50 is still evaluated.")
+        args = parse_paths(parser, "evaluate_paired_vod", argv)
+        if args.backbone_benchmark_steps < 0 or (args.backbone_benchmark_steps and args.warmup_frames < 1):
+            parser.error('Backbone benchmark requires nonnegative steps and positive warmup frames.')
+        args.action = action
+        return args
     parser.add_argument("--val-annotations")
     parser.add_argument("--val-frames-root")
     parser.add_argument("--val-video-ids")
@@ -81,6 +116,7 @@ def parse_args(argv=None):
         parser.error('Classification starts from official timm weights, not another experiment')
     if args.task == 'detection' and not args.resume:
         args.init_checkpoint = args.init_checkpoint or str(directory / 'classification.pt')
+    args.action = action
     return args
 
 
@@ -159,8 +195,75 @@ def build_training_data(args, model, metadata):
     return train, val
 
 
-def train(args):
-    """Set up models, initialization, data, optimizer, and resume state before calling the training engine."""
+def run(args):
+    """Prepare training or evaluation, keeping the action out of saved experiment settings."""
+    args = copy(args)
+    action = vars(args).pop('action')
+    if action == 'eval':
+        model, payload = load_evaluation_model(args.checkpoint)
+        if getattr(model, 'standalone', None) and args.mode != 'big':
+            raise ValueError('Matched standalone evaluation uses --mode big (the sole backbone, including standalone small).')
+        if payload.get("validation_pending"):
+            raise ValueError("Recover pending detector validation before evaluation.")
+        dataset = selected_dataset(args, model.model_cfg.image_size, interpolation=model.model_cfg.input_interpolation, paired=model.model_cfg.uses_timm)
+        select_evaluation_frames(dataset, args.frames_per_video, args.subset_seed)
+        validate_native_categories(payload, dataset)
+        guard_held_out(payload.get("training_signatures", []), dataset)
+        precision_ids = set()
+        if args.precision_image_ids:
+            raw = json.loads(Path(args.precision_image_ids).read_text())
+            if (not isinstance(raw, list) or any(type(v) is not int for v in raw) or len(set(raw)) != len(raw)):
+                raise ValueError("Precision requests must be a JSON list of distinct integer image IDs.")
+            precision_ids = set(raw)
+            if not precision_ids.issubset(dataset.routing_records):
+                raise ValueError("Precision requests include unevaluated image IDs.")
+        options = LSTMEvalConfig(args.device, args.score_threshold, args.max_detections, args.warmup_frames,
+                                     args.seed, not args.no_progress, not args.no_losses)
+        modes = ("small", "big", "fixed") if args.mode == "all" else (args.mode,)
+        policies = {mode: LSTMPolicyConfig(mode, args.interval,
+                                       args.scene_change_threshold, not args.keep_state_on_scene_change,
+                                       args.memory_feedback) for mode in modes}
+        if args.mode == "small" and precision_ids:
+            raise ValueError("Small-only baseline cannot honor precision requests.")
+        visuals = (None if args.no_visuals else
+                   {"draw_score_threshold": args.draw_score_threshold, "max_side": args.max_side,
+                    "playback_fps": args.playback_fps, "save_frames_every": args.save_frames_every})
+        output = Path(args.output_dir)
+        output.mkdir(parents=True, exist_ok=False)
+        write_json({"status": "running"}, output / "run_status.json")
+        provenance = {"checkpoint": str(Path(args.checkpoint).resolve()),
+                      "checkpoint_sha256": sha256_file(args.checkpoint), "epoch": payload.get("epoch"),
+                      "global_step": payload.get("global_step"), "budget": payload.get("budget"),
+                      "arguments": vars(args)}
+        write_json(provenance, output / "evaluation_source.json")
+        results = {}
+        try:
+            for mode, policy in policies.items():
+                name = f"fixed_k{args.interval}" if mode == "fixed" else mode
+                results[name] = export_lstm_run(model, dataset,
+                                                  policy, options, output / name,
+                                                  precision_ids if mode == "fixed" else None, visuals)
+                results[name]["evaluation_source"] = provenance
+                write_json(results[name], output / name / "metrics.json")
+            write_json({"results": {name: {key: metrics[key] for key in
+                        ("mAP@0.5", "FPS", "conv_linear_FLOPs_per_frame", "big_call_frequency", "num_frames",
+                         "present_classes", "absent_classes", "positive_counts_per_class")}
+                        for name, metrics in results.items()}, "arguments": vars(args)}, output / "summary.json")
+            if args.backbone_benchmark_steps:
+                timings = benchmark_backbones(model, args.backbone_benchmark_steps, args.warmup_frames)
+                report = {'backbones': timings, 'torch_version': str(torch.__version__),
+                          'scope': 'Serial batch-1 backbone wrapper including normalization where implemented; '
+                                   'resident synthetic input; excludes resize, transfer, projection, LSTM, SSD and NMS.'}
+                write_json(report, output / 'backbone_benchmark.json')
+                print(json.dumps(report, indent=2))
+            write_json({"status": "complete", "modes": list(results)}, output / "run_status.json")
+        except BaseException as error:
+            write_json({"status": "failed", "error": str(error)}, output / "run_status.json")
+            raise
+        print(json.dumps(json.loads((output / "summary.json").read_text())["results"], indent=2))
+        return results
+    if action != 'train':
+        raise ValueError('Choose train or eval.')
     requested_stop = vars(args).pop('early_stopping', None)
     expanding = vars(args).pop('expand_subset', False)  # One-time action, never inherited on resume.
     resume = load_checkpoint(args.resume) if args.resume else None
@@ -255,7 +358,19 @@ def train(args):
                          definition=definition, early_stopping=early_stopping)
 
 
+
+def main(argv=None):
+    """Dispatch train or eval while keeping action-specific setup and saved settings separate."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    selector = argparse.ArgumentParser(description=__doc__)
+    selector.add_argument('action', choices=('train', 'eval'))
+    action = selector.parse_args(argv[:1]).action
+    args = parse_args(argv[1:], action=action)
+    if action == 'train':
+        with run_lock(args.checkpoint_out):
+            return run(args)
+    return run(args)
+
+
 if __name__ == '__main__':
-    args = parse_args()
-    with run_lock(args.checkpoint_out):
-        train(args)
+    main()

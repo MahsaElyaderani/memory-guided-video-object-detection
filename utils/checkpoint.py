@@ -175,3 +175,11 @@ def save_training_checkpoint(model, optimizer, args, *, epoch, budget, scheduler
     suffix = f" update {budget['updates']}"
     print(f'Saved {args.experiment} {args.task} epoch {epoch}{suffix}: {destination}', flush=True)
     return payload
+
+
+def load_evaluation_model(path):
+    """Load and reconstruct a supported matched detection checkpoint with strict checks."""
+    payload = load_checkpoint(path)
+    if payload.get('stage') != 'matched_detection':
+        raise ValueError('Matched evaluation requires a matched detection checkpoint.')
+    return model_from_matched(payload), payload

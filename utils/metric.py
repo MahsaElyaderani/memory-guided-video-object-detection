@@ -1,6 +1,7 @@
 """Reusable evaluation utilities for detection postprocessing, AP metrics, classification metrics, and prediction exports."""
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from typing import Dict, List, Sequence
 
@@ -401,3 +402,41 @@ def profiled_costs(model, device, warmup):
             model.forward_small(frame, state)
     synchronize(device)
     return {"big": big, "small": small}
+
+
+@torch.no_grad()
+def benchmark_backbones(model, steps, warmup):
+    """Time batch-one backbone forwards on resident synthetic inputs, restoring module training modes."""
+    if steps < 1 or warmup < 1:
+        raise ValueError('Backbone benchmarking requires positive steps and warmup.')
+    standalone = getattr(model, 'standalone', None)
+    branches = {standalone or 'big': (model.big.backbone,
+                model.paired_config.fast_image_size if standalone == 'small' else model.model_cfg.image_size)}
+    if not standalone:
+        branches['small'] = (model.fast_backbone, model.paired_config.fast_image_size)
+    results = {}
+    for name, (backbone, size) in branches.items():
+        parameter = next(backbone.parameters())
+        device = parameter.device
+        if device.type not in ('cpu', 'cuda'):
+            raise ValueError('Backbone timing supports CPU and CUDA only.')
+        frame = torch.zeros(1, 3, size, size, device=device, dtype=parameter.dtype)
+        modes = [(child, child.training) for child in backbone.modules()]
+        backbone.eval()
+        try:
+            for _ in range(warmup):
+                backbone(frame)
+            elapsed = 0.
+            for _ in range(steps):
+                synchronize(device)
+                started = time.perf_counter()
+                backbone(frame)
+                synchronize(device)
+                elapsed += time.perf_counter() - started
+            results[name] = {'FPS': steps / elapsed, 'mean_ms': 1000 * elapsed / steps,
+                             'input_shape': list(frame.shape), 'dtype': str(frame.dtype),
+                             'device': str(device), 'steps': steps, 'warmup': warmup}
+        finally:
+            for child, training in modes:
+                child.training = training
+    return results

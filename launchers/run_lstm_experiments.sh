@@ -71,7 +71,7 @@ for EXP in $EXPERIMENTS; do
   if [[ -f "$DIR/classification.pt" ]]; then CLASS_RESUME=(--resume "$DIR/classification.pt"); fi
   if [[ -f "$DIR/detection.pt" ]]; then DET_RESUME=(--resume "$DIR/detection.pt"); fi
   printf '\nTraining %s\n' "$EXP"
-  python -u train_lstm_models.py \
+  python -u train_lstm_models.py train \
     --experiment "$EXP" --task classification ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
     --video-ids "$TRAIN_SUBSET" \
     --checkpoint-out "$DIR/classification.pt" "${CLASS_RESUME[@]}" \
@@ -81,7 +81,7 @@ for EXP in $EXPERIMENTS; do
     --max-val-videos "$MAX_VAL_VIDEOS" --val-frames-per-video "$VAL_FRAMES_PER_VIDEO" \
     --subset-seed "$SUBSET_SEED" --seed 0 --device cuda
 
-  python -u train_lstm_models.py \
+  python -u train_lstm_models.py train \
     --experiment "$EXP" --task detection ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
     --video-ids "$TRAIN_SUBSET" \
     --checkpoint-out "$DIR/detection.pt" "${DET_RESUME[@]}" \
@@ -111,7 +111,7 @@ for EXP in $EXPERIMENTS; do
   MODE=big
   case "$EXP" in joint_*) MODE=fixed ;; esac
   printf '\nEvaluating %s\n' "$EXP"
-  python -u evaluate_lstm_models.py \
+  python -u train_lstm_models.py eval \
     --checkpoint "$DIR/detection_best.pt" \
     --mode "$MODE" --interval 8 \
     --max-videos "$MAX_VAL_VIDEOS" --frames-per-video "$VAL_FRAMES_PER_VIDEO" \

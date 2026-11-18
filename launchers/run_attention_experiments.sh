@@ -21,16 +21,20 @@ set -u
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 RUNS="$(python utils/path.py --get RUNS_DIR)"
-ROOT="$RUNS/p4_student_imagenet_no_projection"
+ROOT="$RUNS/experiments/attention/tinynet_d"
+# RUN_NAME selects a run within each model; subsets never switch implicitly on resume.
+SUBSET="${TRAIN_SUBSET:-0.25}"
+case "$SUBSET" in
+  0.25) SUBSET="$RUNS/experiments/manifests/train_25pct.json" ;;
+  0.5) SUBSET="$RUNS/experiments/manifests/train_50pct.json" ;;
+  1|1.0) SUBSET="$RUNS/experiments/manifests/train_100pct.json" ;;
+esac
+TAG="$(basename "$SUBSET" .json)"
+TAG="${TAG/#train_/train}"
+TAG="${TAG%pct}_seed0"
 
 experiment_dir() {
-  local name="$1" old=none
-  [[ "$name" != attention_memory ]] || old=p4
-  if [[ ! -d "$ROOT/$name" && -d "$ROOT/$old" ]]; then
-    printf '%s\n' "$ROOT/$old"
-  else
-    printf '%s\n' "$ROOT/$name"
-  fi
+  printf '%s/%s/%s\n' "$ROOT" "$1" "${RUN_NAME:-$TAG}"
 }
 
 if [[ "$ACTION" != eval ]]; then
@@ -42,7 +46,8 @@ if [[ "$ACTION" != eval ]]; then
     fi
     printf 'Training %s using %s\n' "$MODE" "${SOURCE[1]:-ImageNet backbone weights}"
     python -u train_attention_models.py train --memory "$MODE" --run-dir "$DIR" ${SOURCE[@]+"${SOURCE[@]}"} \
-      ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --device cuda
+      ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --subset "$SUBSET" \
+      --manifest "$RUNS/experiments/manifests/val100x20_seed7.json" --device cuda
   done
 fi
 
@@ -54,7 +59,8 @@ if [[ "$ACTION" != train ]]; then
     BEST_STUDENT="$(experiment_dir "$MODE")/detection_best.pt"
     [[ -f "$BEST_STUDENT" ]] || { echo "Missing best checkpoint: $BEST_STUDENT" >&2; exit 1; }
     printf 'Evaluating %s using %s\n' "$MODE" "$BEST_STUDENT"
-    python -u train_attention_models.py eval --memory "$MODE" --checkpoint "$BEST_STUDENT" --device cuda \
+    python -u train_attention_models.py eval --memory "$MODE" --checkpoint "$BEST_STUDENT" \
+      --manifest "$RUNS/experiments/manifests/val100x20_seed7.json" --device cuda \
       --output-dir "$OUT/$MODE" --visuals
   done
   printf 'Evaluation results: %s\n' "$OUT"

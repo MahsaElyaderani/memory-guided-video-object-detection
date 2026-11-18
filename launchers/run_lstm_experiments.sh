@@ -36,6 +36,8 @@ CLASS_BATCH=8
 DET_BATCH=4
 WORKERS=4
 VALIDATE_EVERY=5000
+# TRAIN_SUBSET accepts 0.25, 0.5, 1, or a manifest path.
+# RUN_NAME selects a run directory beneath each organized model folder.
 # Override these with environment variables, or edit the defaults here.
 MAX_VAL_VIDEOS="${MAX_VAL_VIDEOS:-100}"
 VAL_FRAMES_PER_VIDEO="${VAL_FRAMES_PER_VIDEO:-20}"
@@ -44,47 +46,61 @@ RUNS="$(python utils/path.py --get RUNS_DIR)"
 RESULTS="$(python utils/path.py --get RESULTS_DIR)"
 TRAIN_SUBSET="${TRAIN_SUBSET:-0.25}"
 case "$TRAIN_SUBSET" in
-  0.25) TRAIN_SUBSET="$PWD/splits/train_25pct.json" ;;
-  0.5) TRAIN_SUBSET="$PWD/splits/train_50pct.json" ;;
+  0.25) TRAIN_SUBSET="$RUNS/experiments/manifests/train_25pct.json" ;;
+  0.5) TRAIN_SUBSET="$RUNS/experiments/manifests/train_50pct.json" ;;
+  1|1.0) TRAIN_SUBSET="$RUNS/experiments/manifests/train_100pct.json" ;;
 esac
 SUBSET_TAG="$(basename "$TRAIN_SUBSET" .json)"
-case "$SUBSET_TAG" in
-  train_10pct|train_25pct|train_50pct) SUBSET_TAG="subset${SUBSET_TAG#train_}"; SUBSET_TAG="${SUBSET_TAG%pct}" ;;
-esac
-DEFAULT_RUN="shared_${FAMILY}_${SUBSET_TAG}_class${CLASS_EPOCHS}_linear_det${DET_EPOCHS}_cosine"
+SUBSET_TAG="${SUBSET_TAG/#train_/train}"
+DEFAULT_RUN="${SUBSET_TAG%pct}_seed0"
 if [[ "$MAX_VAL_VIDEOS/$VAL_FRAMES_PER_VIDEO/$SUBSET_SEED" != "100/20/7" ]]; then
   DEFAULT_RUN="${DEFAULT_RUN}_val${MAX_VAL_VIDEOS}x${VAL_FRAMES_PER_VIDEO}_seed${SUBSET_SEED}"
 fi
-STANDALONE_ROOT="$RUNS/${RUN_NAME:-${DEFAULT_RUN}_backbone_pretrain}/seed_0"
-RUN_NAME="${RUN_NAME:-$DEFAULT_RUN}"
-ROOT="$RUNS/$RUN_NAME/seed_0"
+ROOT="$RUNS/experiments/lstm/$FAMILY"
 
-# Re-running resumes only this shared-launcher family folder.
-printf '\nJoint checkpoint folder: %s\nStandalone checkpoint folder: %s\n' "$ROOT" "$STANDALONE_ROOT"
+experiment_dir() {
+  local model=joint tag="$DEFAULT_RUN"
+  case "$1" in small_*) model=small ;; big_*) model=big ;; esac
+  # Existing MobileNet runs have distinct budgets; never override them on resume.
+  if [[ "$FAMILY/$tag" == mobilenetv2/train25_seed0 ]]; then
+    tag=train25_seed0_det5_linear
+    [[ "$model" != joint ]] || tag=train25_seed0_det100_cosine
+  fi
+  printf '%s/%s/%s\n' "$ROOT" "$model" "${RUN_NAME:-$tag}"
+}
+
 if [[ "$ACTION" != eval ]]; then
 [[ -f "$TRAIN_SUBSET" ]] || { printf 'Missing training subset: %s\n' "$TRAIN_SUBSET" >&2; exit 1; }
 for EXP in $EXPERIMENTS; do
-  DIR="$ROOT/$EXP"
-  [[ "$EXP" == joint_* ]] || DIR="$STANDALONE_ROOT/$EXP"
-  CLASS_RESUME=()
-  DET_RESUME=()
-  if [[ -f "$DIR/classification.pt" ]]; then CLASS_RESUME=(--resume "$DIR/classification.pt"); fi
-  if [[ -f "$DIR/detection.pt" ]]; then DET_RESUME=(--resume "$DIR/detection.pt"); fi
+  DIR="$(experiment_dir "$EXP")"
+  if [[ -f "$DIR/detection.pt" ]]; then
+    printf '\nResuming %s detection\n' "$EXP"
+    python -u train_lstm_models.py train --experiment "$EXP" --task detection \
+      --resume "$DIR/detection.pt" --checkpoint-out "$DIR/detection.pt" \
+      --video-ids "$TRAIN_SUBSET" ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --num-workers "$WORKERS" --device cuda
+    continue
+  fi
   printf '\nTraining %s\n' "$EXP"
-  python -u train_lstm_models.py train \
-    --experiment "$EXP" --task classification ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
-    --video-ids "$TRAIN_SUBSET" \
-    --checkpoint-out "$DIR/classification.pt" "${CLASS_RESUME[@]}" \
-    --epochs "$CLASS_EPOCHS" --lr-schedule linear --validate-every "$VALIDATE_EVERY" \
-    --batch-size "$CLASS_BATCH" --num-workers "$WORKERS" \
-    --steps 3 --learning-rate 0.01 \
-    --max-val-videos "$MAX_VAL_VIDEOS" --val-frames-per-video "$VAL_FRAMES_PER_VIDEO" \
-    --subset-seed "$SUBSET_SEED" --seed 0 --device cuda
+  if [[ -f "$DIR/classification.pt" ]]; then
+    python -u train_lstm_models.py train --experiment "$EXP" --task classification \
+      --resume "$DIR/classification.pt" --checkpoint-out "$DIR/classification.pt" \
+      --video-ids "$TRAIN_SUBSET" ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} --num-workers "$WORKERS" --device cuda
+  else
+    python -u train_lstm_models.py train \
+      --experiment "$EXP" --task classification ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
+      --video-ids "$TRAIN_SUBSET" \
+      --checkpoint-out "$DIR/classification.pt" \
+      --epochs "$CLASS_EPOCHS" --lr-schedule linear --validate-every "$VALIDATE_EVERY" \
+      --batch-size "$CLASS_BATCH" --num-workers "$WORKERS" \
+      --steps 3 --learning-rate 0.01 \
+      --max-val-videos "$MAX_VAL_VIDEOS" --val-frames-per-video "$VAL_FRAMES_PER_VIDEO" \
+      --subset-seed "$SUBSET_SEED" --seed 0 --device cuda
+  fi
 
   python -u train_lstm_models.py train \
     --experiment "$EXP" --task detection ${STOP_OPTIONS[@]+"${STOP_OPTIONS[@]}"} \
     --video-ids "$TRAIN_SUBSET" \
-    --checkpoint-out "$DIR/detection.pt" "${DET_RESUME[@]}" \
+    --checkpoint-out "$DIR/detection.pt" \
     --init-checkpoint "$DIR/classification_best.pt" \
     --epochs "$DET_EPOCHS" --lr-schedule cosine --validate-every "$VALIDATE_EVERY" \
     --batch-size "$DET_BATCH" --num-workers "$WORKERS" \
@@ -97,17 +113,15 @@ fi
 
 if [[ "$ACTION" != train ]]; then
 for EXP in $EXPERIMENTS; do
-  DIR="$ROOT/$EXP"
-  [[ "$EXP" == joint_* ]] || DIR="$STANDALONE_ROOT/$EXP"
+  DIR="$(experiment_dir "$EXP")"
   [[ -f "$DIR/detection_best.pt" ]] || {
     echo "Missing best detection checkpoint: $DIR/detection_best.pt" >&2; exit 1;
   }
 done
 mkdir -p "$RESULTS"
-OUT="$(mktemp -d "$RESULTS/${RUN_NAME}_seed0_XXXXXX")"
+OUT="$(mktemp -d "$RESULTS/${FAMILY}_${RUN_NAME:-$DEFAULT_RUN}_XXXXXX")"
 for EXP in $EXPERIMENTS; do
-  DIR="$ROOT/$EXP"
-  [[ "$EXP" == joint_* ]] || DIR="$STANDALONE_ROOT/$EXP"
+  DIR="$(experiment_dir "$EXP")"
   MODE=big
   case "$EXP" in joint_*) MODE=fixed ;; esac
   printf '\nEvaluating %s\n' "$EXP"

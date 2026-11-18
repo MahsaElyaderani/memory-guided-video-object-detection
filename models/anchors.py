@@ -11,6 +11,7 @@ from torch import Tensor
 
 @dataclass(frozen=True)
 class BoxCoderScales:
+    """Scaling factors for center offsets and log-size box regression targets."""
     y: float = 10.0
     x: float = 10.0
     h: float = 5.0
@@ -18,6 +19,7 @@ class BoxCoderScales:
 
 
 def _box_iou_xyxy(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+    """Return pairwise IoU [N,M] for two sets of xyxy boxes."""
     if boxes1.ndim != 2 or boxes1.shape[-1] != 4:
         raise ValueError("boxes1 must have shape [N,4].")
     if boxes2.ndim != 2 or boxes2.shape[-1] != 4:
@@ -53,6 +55,7 @@ class SSDAnchorGenerator:
         reduce_boxes_in_lowest_layer: bool = True,
         clip: bool = False,
     ) -> None:
+        """Store the per-level scale, aspect-ratio, and clipping settings."""
         if num_levels <= 0:
             raise ValueError("num_levels must be positive.")
         self.num_levels = int(num_levels)
@@ -65,6 +68,7 @@ class SSDAnchorGenerator:
 
     @property
     def scales(self) -> Tuple[float, ...]:
+        """Return level scales plus the final scale used for interpolation."""
         if self.num_levels == 1:
             return (self.min_scale, 1.0)
         values = [
@@ -75,6 +79,7 @@ class SSDAnchorGenerator:
 
     @property
     def num_anchors_per_location(self) -> Tuple[int, ...]:
+        """Return anchor counts per grid location, in feature-level order."""
         first = 3 if self.reduce_boxes_in_lowest_layer else (
             len(self.aspect_ratios) + int(self.interpolated_scale_aspect_ratio > 0)
         )
@@ -82,6 +87,7 @@ class SSDAnchorGenerator:
         return (first,) + (other,) * (self.num_levels - 1)
 
     def _specs_for_level(self, level: int) -> List[Tuple[float, float]]:
+        """Return (scale, aspect ratio) pairs for one feature level."""
         scale = self.scales[level]
         next_scale = self.scales[level + 1]
         if level == 0 and self.reduce_boxes_in_lowest_layer:
@@ -101,6 +107,7 @@ class SSDAnchorGenerator:
         device: torch.device | str | None = None,
         dtype: torch.dtype = torch.float32,
     ) -> Tensor:
+        """Create normalized [A,4] anchors in the same order as flattened predictions."""
         if len(feature_map_shapes) != self.num_levels:
             raise ValueError(
                 f"Expected {self.num_levels} feature-map shapes, got {len(feature_map_shapes)}"
@@ -182,6 +189,7 @@ def match_anchors(
 
 
 def _xyxy_to_center(boxes: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Convert corner coordinates to center x/y and positive width/height."""
     xmin, ymin, xmax, ymax = boxes.unbind(dim=-1)
     w = (xmax - xmin).clamp(min=1e-8)
     h = (ymax - ymin).clamp(min=1e-8)

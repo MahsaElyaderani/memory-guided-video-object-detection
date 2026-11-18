@@ -6,8 +6,8 @@ conda activate vision
 set -u
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-RUNS="$(python path.py --get RUNS_DIR)"
-RESULTS="$(python path.py --get RESULTS_DIR)"
+RUNS="$(python utils/path.py --get RUNS_DIR)"
+RESULTS="$(python utils/path.py --get RESULTS_DIR)"
 ROOT="$(python - "$RUNS" "${1:-}" <<'PY'
 import sys
 from pathlib import Path

@@ -1,10 +1,11 @@
+"""Entry point and shared rendering helpers for comparing two saved detection runs."""
 import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from path import parse_paths
+from utils.path import parse_paths
 import argparse
 import csv
 import json
@@ -15,8 +16,8 @@ import cv2
 import numpy as np
 import torch
 
-from engine.visualizer import render_frame
-from utils.results import save_results
+from utils.visualizer import render_frame
+from utils.json_io import save_results
 from utils.runtime import tqdm
 
 
@@ -26,6 +27,7 @@ COMPARISON_KEYS = ('evaluated_image_ids', 'video_ids', 'frames_per_video', 'clas
 
 
 def validate_runs(run_a, run_b):
+    """Require completed runs with identical evaluated frames, class definitions, and filtering settings."""
     metrics = []
     for directory in (run_a, run_b):
         if json.loads((directory / 'run_status.json').read_text())['status'] != 'complete':
@@ -38,7 +40,9 @@ def validate_runs(run_a, run_b):
 
 
 def row_tensors(row):
+    """Convert an exported prediction row into target and prediction tensors for rendering."""
     def tensors(entries, scores=False):
+        """Convert normalized exported boxes and labels, including scores when requested."""
         result = {'boxes': torch.tensor([item['box_xyxy_normalized'] for item in entries],
                                          dtype=torch.float32).reshape(-1, 4),
                   'labels': torch.tensor([item['dataset_label'] for item in entries], dtype=torch.long)}
@@ -51,6 +55,7 @@ def row_tensors(row):
 
 
 def comparison_frame(image, row_a, row_b, class_names, label_a, label_b, threshold, max_side):
+    """Render ground truth and two predictions as a single comparison frame."""
     target, pred_a = row_tensors(row_a)
     _, pred_b = row_tensors(row_b)
     a = render_frame(image, target, pred_a, class_names, label_a, threshold, 'side-by-side', max_side)
@@ -61,6 +66,7 @@ def comparison_frame(image, row_a, row_b, class_names, label_a, label_b, thresho
 
 
 def main():
+    """Validate two saved runs and export aligned comparison videos and optional still frames."""
     parser = argparse.ArgumentParser(description='Render matched saved detections as GT | model A | model B; no inference rerun.')
     parser.add_argument('--run-a', required=True)
     parser.add_argument('--run-b', required=True)

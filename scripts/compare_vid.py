@@ -26,24 +26,25 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import torch
-from path import VAL_ANNOTATIONS, VAL_FRAMES
-from engine.evaluator import compute_map50
-from engine.trainer_lstm import EvaluationOptions
-from engine.evaluator import export_lstm_run
+from utils.path import VAL_ANNOTATIONS, VAL_FRAMES
+from utils.metric import compute_map50
+from utils.metric import export_lstm_run
 from utils.evaluation_data import select_evaluation_frames
 from evaluate_lstm_models import load_evaluation_model
-from lstm_config import PolicyConfig
-from routing.data import selected_dataset, validate_native_categories, guard_held_out
-from routing.predictions import sha256_file
+from utils.config import LSTMPolicyConfig, LSTMEvalConfig
+from utils.evaluation_data import selected_dataset, validate_native_categories, guard_held_out
+from utils.runtime import sha256_file
 from utils.evaluation_data import normalized_target, raw_detection_row
 
 
 def write_json(path, value):
+    """Write a new JSON report, rejecting existing files and non-finite numeric values."""
     with Path(path).open('x') as stream:
         json.dump(value, stream, indent=2, allow_nan=False)
 
 
 def frame_manifest(dataset):
+    """Export ordered frame identities, dimensions, class labels, and ground truth."""
     empty = {'boxes': torch.empty(0, 4), 'labels': torch.empty(0, dtype=torch.long), 'scores': torch.empty(0)}
     rows = []
     for record in dataset.routing_records.values():
@@ -54,6 +55,7 @@ def frame_manifest(dataset):
 
 
 def load_manifest(args):
+    """Verify annotation identity and reconstruct exactly the frames and labels in the manifest."""
     selection = json.loads(args.manifest.read_text())
     if selection['annotations_sha256'] != sha256_file(args.annotations):
         raise ValueError('Manifest annotation hash differs; use the original annotation file.')
@@ -137,6 +139,7 @@ def score_predictions(selection, rows):
 
 
 def compare(args):
+    """Evaluate selected native and external Delta models on one verified frame manifest."""
     import pycocotools  # Fail before inference if the official evaluator is unavailable.
     selection, dataset = load_manifest(args)
     models = dict(item.split('=', 1) for item in args.model)
@@ -155,8 +158,8 @@ def compare(args):
         validate_native_categories(payload, dataset)
         guard_held_out(payload.get('training_signatures', []), dataset)
         mode = 'big' if getattr(model, 'standalone', None) else 'fixed'
-        metrics = export_lstm_run(model, dataset, PolicyConfig(mode, 10),
-                                   EvaluationOptions(args.device, 0., 100, 10, 0, True, False),
+        metrics = export_lstm_run(model, dataset, LSTMPolicyConfig(mode, 10),
+                                   LSTMEvalConfig(args.device, 0., 100, 10, 0, True, False),
                                    args.output / name, visual_options={} if args.visuals else None)
         rows = []
         for line in (args.output / name / 'detections.jsonl').read_text().splitlines():
@@ -217,6 +220,7 @@ def compare(args):
 
 
 def main():
+    """Dispatch manifest export or fixed-manifest model comparison from command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('action', choices=('export', 'compare'))
     parser.add_argument('--manifest', type=Path, required=True)

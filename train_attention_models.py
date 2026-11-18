@@ -8,14 +8,14 @@ import uuid
 
 import torch
 
-import path
+from utils import path
 from utils.runtime import run_lock, ATTENTION_MEMORY_NAMES, load_checkpoint, write_json, early_stopping_reached, seed_training
-from utils.checkpoints import restore_rng
-from routing.data import data_signature, guard_held_out, selected_dataset
-from routing.predictions import sha256_file
+from utils.checkpoint import restore_rng
+from utils.evaluation_data import data_signature, guard_held_out, selected_dataset
+from utils.runtime import sha256_file
 from scripts.compare_vid import load_manifest
-from models.frozen_efficientdet_teacher import EfficientDetTeacher
-from models.attention_memory_detector import P4Student
+from models.efficientdet import EfficientDetTeacher
+from models.attention_models import AttentionDetector
 from losses.multibox_loss import criterion_for
 from engine import trainer_attention as trainer
 # Preserve established imports while the implementations live in the engine.
@@ -49,7 +49,7 @@ def run(args):
             args.num_workers < 0 or not math.isfinite(args.learning_rate) or args.learning_rate <= 0):
         raise ValueError('Invalid training budget, worker count or learning rate.')
     seed_training(args.seed)
-    student = P4Student(args.memory, imagenet=not saved).to(args.device)
+    student = AttentionDetector(args.memory, imagenet=not saved).to(args.device)
     if saved:
         student.load_state_dict(saved['model'], strict=True)
     if args.action == 'eval':
@@ -115,6 +115,7 @@ def run(args):
 
 
 def main():
+    """Parse attention train/eval options and dispatch the prepared experiment under its run lock."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('train', 'eval'))
     parser.add_argument('--memory', required=True, choices=(*ATTENTION_MEMORY_NAMES.values(), *ATTENTION_MEMORY_NAMES),

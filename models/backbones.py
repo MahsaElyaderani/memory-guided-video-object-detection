@@ -7,8 +7,10 @@ MODEL_NAMES = {1.0: 'mobilenetv2_100.ra_in1k', 0.5: 'mobilenetv2_050.lamb_in1k',
                1.1: 'mobilenetv2_110d.ra_in1k', 1.2: 'mobilenetv2_120d.ra_in1k'}
 
 
-class TimmMobileNetV2Backbone(nn.Module):
+class Backbone(nn.Module):
+    """Pretrained-compatible timm feature extractor with checkpoint-specific normalization."""
     def __init__(self, width_mult=1.0, output_stride=32, *, model_name=None):
+        """Build feature layers without downloading weights; optionally change output stride."""
         super().__init__()
         if width_mult not in MODEL_NAMES or output_stride not in (16, 32):
             raise ValueError('Supported timm variants: .5/1.0/1.1d/1.2d; output strides: 32/16.')
@@ -34,6 +36,7 @@ class TimmMobileNetV2Backbone(nn.Module):
         self.register_buffer('input_std', torch.tensor(self.data_config['std']).view(1, 3, 1, 1), persistent=False)
 
     def set_output_stride16(self):
+        """Remove the last downsampling stride while preserving parameter tensor shapes."""
         layer = self.network.blocks[5][0].conv_dw
         if layer.stride != (2, 2) or layer.dilation != (1, 1):
             raise ValueError('Unexpected timm downsampling architecture.')
@@ -42,6 +45,7 @@ class TimmMobileNetV2Backbone(nn.Module):
         self.output_stride = 16
 
     def _validate_data_config(self, config):
+        """Reject preprocessing settings outside the supported pretrained configurations."""
         size = 152 if self.model_name == 'tinynet_d.in1k' else 224
         if (tuple(config['mean']) != (.485, .456, .406) or
                 tuple(config['std']) != (.229, .224, .225) or
@@ -49,17 +53,20 @@ class TimmMobileNetV2Backbone(nn.Module):
             raise ValueError('Checkpoint preprocessing differs from the supported detection pipeline.')
 
     def normalize(self, frames):
+        """Convert project RGB tensors from [-1,1] to checkpoint-normalized inputs."""
         if frames.ndim != 4 or frames.shape[1] != 3 or not frames.is_floating_point():
             raise ValueError('Expected floating RGB [N,3,H,W] in project [-1,1] scaling.')
         return ((frames + 1) * .5 - self.input_mean) / self.input_std
 
     def forward(self, frames):
         # Final spatial features, before classification pooling and its normalization.
+        """Return final spatial backbone features before classification pooling."""
         return self.network.forward_features(self.normalize(frames))
 
     def load_pretrained(self):
+        """Load and verify official timm feature weights, returning initialization metadata."""
         import timm
-        from path import TIMM_CACHE
+        from utils.path import TIMM_CACHE
         source = timm.create_model(self.model_name, pretrained=True, cache_dir=str(TIMM_CACHE))
         config = timm.data.resolve_model_data_config(source)
         self._validate_data_config(config)
@@ -78,9 +85,10 @@ class TimmMobileNetV2Backbone(nn.Module):
 
 
 def build_backbone(config):
+    """Construct the configured MobileNetV2, TinyNet-D, or EfficientNet-B0 backbone."""
     if config.backbone in ('tinynet_d', 'efficientnet_b0'):
         name = 'tinynet_d.in1k' if config.backbone == 'tinynet_d' else 'efficientnet_b0.ra_in1k'
-        return TimmMobileNetV2Backbone(model_name=name)
+        return Backbone(model_name=name)
     if config.backbone == 'timm_mobilenet_v2':
-        return TimmMobileNetV2Backbone(config.width_mult, 32)
+        return Backbone(config.width_mult, 32)
     raise ValueError(f'Unsupported backbone: {config.backbone}')

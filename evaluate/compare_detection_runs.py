@@ -5,7 +5,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from path import parse_paths
+from utils.path import parse_paths
 import argparse
 import csv
 from itertools import zip_longest
@@ -18,12 +18,13 @@ if __package__ in (None, ""):
     from compare_visual_runs import COMPARISON_KEYS, row_tensors, validate_runs
 else:
     from .compare_visual_runs import COMPARISON_KEYS, row_tensors, validate_runs
-from engine.visualizer import render_frame
+from utils.visualizer import render_frame
 from utils.runtime import write_json, tqdm
 
 
 def compare_runs(run_paths, frames_root, output_dir, labels=None, threshold=.3, max_side=480,
                  playback_fps=30., save_frames_every=30, progress=True, model_only_titles=False):
+    """Render aligned saved runs beside ground truth, without repeating model inference."""
     import math
     paths = [Path(path) for path in run_paths]
     labels = labels or [path.name for path in paths]
@@ -122,6 +123,7 @@ def compare_runs(run_paths, frames_root, output_dir, labels=None, threshold=.3, 
 
 
 def main(argv=None):
+    """Parse comparison options and render saved predictions into a new output directory."""
     parser = argparse.ArgumentParser(description="Draw ground truth and matched predictions from saved detection runs.")
     parser.add_argument("--runs", nargs="+", required=True)
     parser.add_argument("--labels", nargs="+")

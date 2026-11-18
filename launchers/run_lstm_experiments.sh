@@ -40,8 +40,8 @@ VALIDATE_EVERY=5000
 MAX_VAL_VIDEOS="${MAX_VAL_VIDEOS:-100}"
 VAL_FRAMES_PER_VIDEO="${VAL_FRAMES_PER_VIDEO:-20}"
 SUBSET_SEED="${SUBSET_SEED:-7}"
-RUNS="$(python path.py --get RUNS_DIR)"
-RESULTS="$(python path.py --get RESULTS_DIR)"
+RUNS="$(python utils/path.py --get RUNS_DIR)"
+RESULTS="$(python utils/path.py --get RESULTS_DIR)"
 TRAIN_SUBSET="${TRAIN_SUBSET:-0.25}"
 case "$TRAIN_SUBSET" in
   0.25) TRAIN_SUBSET="$PWD/splits/train_25pct.json" ;;

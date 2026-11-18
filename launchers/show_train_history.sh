@@ -6,7 +6,7 @@ conda activate vision
 set -u
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-RUNS="$(python path.py --get RUNS_DIR)"
+RUNS="$(python utils/path.py --get RUNS_DIR)"
 ROOT="${1:-$RUNS}"
 
 python - "$ROOT" <<'PY' | tee "$RUNS/training_history.txt"

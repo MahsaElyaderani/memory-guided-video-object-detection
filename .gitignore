@@ -16,7 +16,8 @@ venv/
 /docs/
 /results/
 /runs/
-/scripts/
+/scripts/*
+!/scripts/sample_vid_videos.py
 /script/
 /tests/
 /test/

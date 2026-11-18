@@ -20,6 +20,7 @@ class SeparableConv2d(nn.Module):
         kernel_size: int = 3,
         bias: bool = True,
     ) -> None:
+        """Build depthwise and pointwise convolutions that preserve spatial resolution."""
         super().__init__()
         if kernel_size % 2 == 0:
             raise ValueError("kernel_size must be odd to preserve spatial size.")
@@ -37,6 +38,7 @@ class SeparableConv2d(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Filter each channel spatially, then mix channels with a 1x1 convolution."""
         return self.pointwise(self.depthwise(x))
 
 
@@ -48,7 +50,7 @@ class BottleneckLSTMCell(nn.Module):
     c_t = c_{t-1} * sigmoid(f + forget_bias) + sigmoid(i) * phi(j)
     h_t = phi(c_t) * sigmoid(o)
 
-    The alpha=1 architecture uses input_channels=1024 and hidden_channels=256.
+    The cell defaults to 1024 input channels; active models configure 1280.
     """
 
     def __init__(
@@ -59,6 +61,7 @@ class BottleneckLSTMCell(nn.Module):
         forget_bias: float = 1.0,
         activation: str = "relu",
     ) -> None:
+        """Build bottleneck and gate convolutions for the configured memory width."""
         super().__init__()
         self.input_channels = input_channels
         self.hidden_channels = hidden_channels
@@ -85,6 +88,7 @@ class BottleneckLSTMCell(nn.Module):
 
     def reset_parameters(self) -> None:
         # Conservative initialization for a recurrent convolutional cell.
+        """Initialize convolution weights and biases using fan-in-based bounds."""
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
                 nn.init.kaiming_uniform_(module.weight, a=5 ** 0.5)
@@ -94,6 +98,7 @@ class BottleneckLSTMCell(nn.Module):
                     nn.init.uniform_(module.bias, -bound, bound)
 
     def _activation(self, x: Tensor) -> Tensor:
+        """Apply the configured ReLU or ReLU6 activation."""
         if self.activation_name == "relu":
             return F.relu(x)
         return F.relu6(x)
@@ -106,6 +111,7 @@ class BottleneckLSTMCell(nn.Module):
         device: torch.device | str,
         dtype: torch.dtype | None = None,
     ) -> State:
+        """Create zero cell and hidden tensors [B,hidden_channels,H,W], in (c,h) order."""
         if batch <= 0 or h <= 0 or w <= 0:
             raise ValueError("batch, h and w must all be positive.")
         if dtype is None:
@@ -116,6 +122,7 @@ class BottleneckLSTMCell(nn.Module):
         return c, hidden
 
     def forward(self, x: Tensor, state: State | None = None) -> Tuple[Tensor, State]:
+        """Return the new hidden feature and (cell, hidden) state for one frame."""
         if x.ndim != 4:
             raise ValueError(f"Expected x [B,C,H,W], got {tuple(x.shape)}")
         if x.shape[1] != self.input_channels:

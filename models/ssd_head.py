@@ -13,10 +13,12 @@ class TFSameConv2d(nn.Conv2d):
     """TensorFlow SAME padding, including asymmetric stride-2 padding."""
 
     def __init__(self, *args, **kwargs):
+        """Disable built-in padding so forward can compute TensorFlow-style SAME padding."""
         kwargs['padding'] = 0
         super().__init__(*args, **kwargs)
 
     def forward(self, x):
+        """Pad spatial dimensions for ceil(input/stride) output, then apply convolution."""
         h, w = x.shape[-2:]
         kh, kw = self.kernel_size
         sh, sw = self.stride
@@ -28,6 +30,7 @@ class TFSameConv2d(nn.Conv2d):
 
 
 class ConvBNReLU6(nn.Sequential):
+    """SAME-padded convolution followed by BatchNorm and ReLU6."""
     def __init__(
         self,
         in_channels: int,
@@ -39,6 +42,7 @@ class ConvBNReLU6(nn.Sequential):
         bn_eps: float = 1e-3,
         bn_decay: float = 0.9997,
     ) -> None:
+        """Create the convolution block, converting BN decay to PyTorch momentum."""
         super().__init__(
             TFSameConv2d(
                 in_channels, out_channels, kernel_size, stride=stride,
@@ -63,6 +67,7 @@ class SSDExtraBlock(nn.Module):
         bn_eps: float = 1e-3,
         bn_decay: float = 0.9997,
     ) -> None:
+        """Create channel reduction, stride-2 depthwise filtering, and output projection."""
         super().__init__()
         self.reduce = ConvBNReLU6(
             in_channels, bottleneck_channels, 1,
@@ -78,21 +83,23 @@ class SSDExtraBlock(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Produce the next, lower-resolution SSD feature level."""
         return self.project(self.depthwise(self.reduce(x)))
 
 
-class SSDFeatureMaps(nn.Module):
-    """Build the four post-LSTM SSD feature maps from Table 1.
+class SSDFeaturePyramid(nn.Module):
+    """Build four extra SSD levels for either memory architecture.
 
-    Input level: Bottleneck-LSTM output [B,256,10,10] for 320x320 input.
+    Input level: [B,256,10,10] for LSTM or [B,64,10,10] for attention.
     Additional levels:
-      FM1: 256 -> 128 -> 256
+      FM1: input_channels -> 128 -> 256
       FM2: 256 ->  64 -> 128
       FM3: 128 ->  64 -> 128
       FM4: 128 ->  32 ->  64
     """
 
     def __init__(self, input_channels: int = 256) -> None:
+        """Build four extra levels for a 256-channel LSTM or 64-channel attention input."""
         super().__init__()
         self.input_channels = input_channels
         self.fm1 = SSDExtraBlock(input_channels, 128, 256)
@@ -100,16 +107,17 @@ class SSDFeatureMaps(nn.Module):
         self.fm3 = SSDExtraBlock(128, 64, 128)
         self.fm4 = SSDExtraBlock(128, 32, 64)
 
-    def forward(self, lstm_feature: Tensor) -> List[Tensor]:
-        if lstm_feature.ndim != 4 or lstm_feature.shape[1] != self.input_channels:
+    def forward(self, input_feature: Tensor) -> List[Tensor]:
+        """Return the input plus four downsampled maps, ordered from fine to coarse."""
+        if input_feature.ndim != 4 or input_feature.shape[1] != self.input_channels:
             raise ValueError(
-                f"Expected feature [B,{self.input_channels},H,W], got {tuple(lstm_feature.shape)}"
+                f"Expected feature [B,{self.input_channels},H,W], got {tuple(input_feature.shape)}"
             )
-        fm1 = self.fm1(lstm_feature)
+        fm1 = self.fm1(input_feature)
         fm2 = self.fm2(fm1)
         fm3 = self.fm3(fm2)
         fm4 = self.fm4(fm3)
-        return [lstm_feature, fm1, fm2, fm3, fm4]
+        return [input_feature, fm1, fm2, fm3, fm4]
 
 
 class _SeparablePredictionConv(nn.Module):
@@ -121,6 +129,7 @@ class _SeparablePredictionConv(nn.Module):
     """
 
     def __init__(self, in_channels: int, out_channels: int) -> None:
+        """Build a linear depthwise/pointwise predictor without normalization or activation."""
         super().__init__()
         self.depthwise = nn.Conv2d(
             in_channels, in_channels, kernel_size=3, padding=1,
@@ -129,10 +138,11 @@ class _SeparablePredictionConv(nn.Module):
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=True)
 
     def forward(self, x: Tensor) -> Tensor:
+        """Produce per-location prediction channels from one feature map."""
         return self.pointwise(self.depthwise(x))
 
 
-class SSDBoxPredictor(nn.Module):
+class SSDPredictionHeads(nn.Module):
     """Per-level depthwise-separable SSD class/box prediction heads.
 
     The paper states predictions are produced by an additional convolution on
@@ -148,6 +158,7 @@ class SSDBoxPredictor(nn.Module):
         anchors_per_location: Sequence[int],
         include_background_class: bool = True,
     ) -> None:
+        """Create separate class and box predictors for every feature level."""
         super().__init__()
         if len(feature_channels) != len(anchors_per_location):
             raise ValueError("feature_channels and anchors_per_location must align.")
@@ -170,6 +181,7 @@ class SSDBoxPredictor(nn.Module):
         self._initialize_weights()
 
     def _initialize_weights(self) -> None:
+        """Initialize predictor convolutions with small normal weights and zero biases."""
         for module in list(self.class_heads) + list(self.box_heads):
             for submodule in module.modules():
                 if isinstance(submodule, nn.Conv2d):
@@ -178,6 +190,7 @@ class SSDBoxPredictor(nn.Module):
                         nn.init.zeros_(submodule.bias)
 
     def forward(self, features: Sequence[Tensor]) -> Tuple[Tensor, Tensor]:
+        """Return logits [B,A,C] and offsets [B,A,4] in level/y/x/anchor order."""
         if len(features) != len(self.feature_channels):
             raise ValueError(
                 f"Expected {len(self.feature_channels)} feature maps, got {len(features)}"

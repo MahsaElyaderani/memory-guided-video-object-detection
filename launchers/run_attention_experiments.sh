@@ -20,7 +20,7 @@ conda activate vision
 set -u
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-RUNS="$(python path.py --get RUNS_DIR)"
+RUNS="$(python utils/path.py --get RUNS_DIR)"
 ROOT="$RUNS/p4_student_imagenet_no_projection"
 
 experiment_dir() {
@@ -47,7 +47,7 @@ if [[ "$ACTION" != eval ]]; then
 fi
 
 if [[ "$ACTION" != train ]]; then
-  RESULTS="$(python path.py --get RESULTS_DIR)"
+  RESULTS="$(python utils/path.py --get RESULTS_DIR)"
   mkdir -p "$RESULTS"
   OUT="$(mktemp -d "$RESULTS/attention_eval_XXXXXX")"
   for MODE in no_memory attention_memory; do

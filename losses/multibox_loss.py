@@ -14,6 +14,7 @@ except ImportError:
 
 
 def criterion_for(model):
+    """Construct the shared SSD loss using the detector matching threshold and box-coder scales."""
     from models.anchors import BoxCoderScales
     s = model.ssd_cfg
     return MultiBoxLoss(num_classes=30, match_iou_threshold=s.match_iou_threshold,
@@ -53,6 +54,7 @@ def hard_negative_mining(
 
 
 def _flatten_targets(targets) -> List[dict]:
+    """Flatten clip targets into frame order while accepting already flat target lists."""
     if not isinstance(targets, list):
         raise TypeError("targets must be a list or nested list of dictionaries.")
     if not targets:
@@ -68,7 +70,7 @@ def _flatten_targets(targets) -> List[dict]:
 
 
 class MultiBoxLoss(nn.Module):
-    """SSD loss for the current LSTMSSD outputs.
+    """SSD loss for the current LSTMDetectorCore outputs.
 
     Classification uses independent sigmoid/BCE logits, matching the released
     TensorFlow config's ``weighted_sigmoid`` loss. Localization uses Smooth-L1.
@@ -91,6 +93,7 @@ class MultiBoxLoss(nn.Module):
         localization_weight: float = 4.0,
         box_coder_scales: BoxCoderScales = BoxCoderScales(),
     ) -> None:
+        """Store class, matching, mining, and loss-weight settings for SSD supervision."""
         super().__init__()
         self.num_classes = int(num_classes)
         self.match_iou_threshold = float(match_iou_threshold)
@@ -101,6 +104,7 @@ class MultiBoxLoss(nn.Module):
         self.box_coder_scales = box_coder_scales
 
     def forward(self, predictions: Dict[str, Tensor], targets) -> Dict[str, Tensor]:
+        """Match anchors and compute positive-normalized classification and box losses across frames."""
         logits = predictions["class_logits"]
         box_regression = predictions["box_regression"]
         anchors = predictions["anchors"]

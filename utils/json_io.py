@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 def save_results(metrics, destination):
+    """Publish a complete JSON file atomically, rejecting overwrites and non-finite values."""
     path = Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + '.', suffix='.tmp')

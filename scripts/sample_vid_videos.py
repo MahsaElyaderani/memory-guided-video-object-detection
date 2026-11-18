@@ -1,16 +1,21 @@
-from path import parse_paths
+"""Command-line tool for reproducible, class-targeted diagnostic video subsets."""
 import argparse
 import hashlib
 import json
 import random
 from collections import defaultdict
 from pathlib import Path
+import sys
 
-from utils.results import save_results
-from vid_categories import VID_CLASSES
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from utils.path import parse_paths
+
+from utils.json_io import save_results
+from datasets.dataset_imagenetvid import VID_CLASSES
 
 
 def select_class_samples(annotation_file, classes, videos_per_class=1, seed=7):
+    """Sample whole videos by class presence and retain all their frames, annotations, and selection metadata."""
     if videos_per_class < 1:
         raise ValueError('videos_per_class must be positive.')
     annotation_file = Path(annotation_file)
@@ -79,6 +84,7 @@ def select_class_samples(annotation_file, classes, videos_per_class=1, seed=7):
 
 
 def main():
+    """Parse requested classes and save a new diagnostic subset annotation file."""
     parser = argparse.ArgumentParser(description='Save a reproducible VID video group covering selected classes.')
     parser.add_argument('--annotations', required=True)
     parser.add_argument('--classes', nargs='+', default=[name for name, _ in VID_CLASSES])

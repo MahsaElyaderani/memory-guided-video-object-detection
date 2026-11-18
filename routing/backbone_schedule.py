@@ -3,11 +3,12 @@
 from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
-from lstm_config import PolicyConfig
+from utils.config import LSTMPolicyConfig
 from datasets.frame_views import big_frames
 
 
 def frame_signature(frame):
+    """Create a detached 16-by-16 RGB summary for comparing adjacent frames."""
     frame = big_frames(frame)
     if frame.ndim != 3 or frame.shape[0] != 3:
         raise ValueError('Expected normalized RGB [3,H,W].')
@@ -15,30 +16,36 @@ def frame_signature(frame):
 
 
 def frame_change(signature, previous):
+    """Measure mean absolute signature change; return zero when no previous frame exists."""
     return 0.0 if previous is None else float((signature - previous).abs().mean())
 
 
 @dataclass
 class VideoContext:
+    """Track big-backbone calls, memory contributions, and the previous frame signature."""
     previous_big: bool = False
     last_big_call: int | None = None
     last_big_contribution: int | None = None
     previous_signature: object = None
 
     def contribution_age(self, step):
+        """Return frames elapsed since the last big-memory contribution, or None if absent."""
         return None if self.last_big_contribution is None else step - self.last_big_contribution
 
     def observe_frame(self, frame):
+        """Measure frame change and retain the current signature for the next comparison."""
         signature = frame_signature(frame)
         change = frame_change(signature, self.previous_signature)
         self.previous_signature = signature
         return change
 
     def scene_reset(self):
+        """Clear contribution history while retaining the last call index and frame signature."""
         self.previous_big = False
         self.last_big_contribution = None
 
     def record(self, used_big, step, contributed):
+        """Record the selected branch and whether it contributed to recurrent memory."""
         self.previous_big = bool(used_big)
         if used_big:
             self.last_big_call = step
@@ -46,7 +53,8 @@ class VideoContext:
             self.last_big_contribution = step
 
 
-def forced_big(config: PolicyConfig, step, last_call, scene_change=False, precision=False):
+def forced_big(config: LSTMPolicyConfig, step, last_call, scene_change=False, precision=False):
+    """Return reasons to call the big branch under the configured evaluation policy."""
     if step < 0 or (last_call is not None and last_call >= step):
         raise ValueError("Invalid video step or previous big-call index.")
     if config.mode == "small":
@@ -69,6 +77,7 @@ def forced_big(config: PolicyConfig, step, last_call, scene_change=False, precis
 
 
 def choose_big(config, step, last_call, scene_change=False, precision=False):
+    """Return the big-branch decision together with its diagnostic reasons."""
     reasons = forced_big(config, step, last_call, scene_change, precision)
     return bool(reasons), reasons
 

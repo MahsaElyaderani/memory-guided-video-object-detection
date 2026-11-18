@@ -1,86 +1,77 @@
 """Reusable LSTM training orchestration, detection loops, and streaming evaluation."""
 from copy import copy
-from pathlib import Path
 import uuid
 from collections import Counter
-from dataclasses import dataclass
 import time
 
 import torch
 
-from engine.evaluator import compute_map50, decode, export_lstm_run
+from utils.metric import compute_map50, decode, export_lstm_run
 from losses.multibox_loss import criterion_for
-from models.joint_lstm_detector import corrupt_memory
-from lstm_config import MemoryCorruption, PolicyConfig, probability
-from utils.compute import profiled_costs, synchronize
-from routing.data import data_signature
+from utils.config import LSTMPolicyConfig, LSTMEvalConfig
+from utils.metric import profiled_costs, synchronize
+from utils.evaluation_data import data_signature
 from utils.evaluation_data import load_frame, normalized_target, select_evaluation_frames
 from routing.backbone_schedule import VideoContext, choose_big, forced_big, random_training_schedule
-from routing.predictions import filtered
-from utils.lstm_checkpoints import detector_fingerprint, lstm_metadata
-from utils.checkpoints import capture_rng, restore_rng
-from utils.resume import saved_arguments
+from utils.metric import filtered
+from utils.checkpoint import detector_fingerprint, save_training_checkpoint
+from utils.checkpoint import capture_rng, restore_rng
 from engine.trainer_classification import classification_epoch
 from utils.runtime import (tqdm, LOSS_KEYS, loss_postfix, early_stopping_reached,
-                           seed_training, save_matched_checkpoints)
+                           seed_training)
 from datasets.dataloader import budget_loader
+
+
+def train_batches(model, loader, optimizer, criterion, args, epoch=1):
+    """Train on prepared clips with random branch choices and one optimizer update per batch."""
+    phase = "joint"
+    model.configure_detector_training()
+    totals, batches, selections = dict.fromkeys(LOSS_KEYS, 0.), 0, 0
+    description = f"Epoch {epoch} {phase} (current/mean)"
+    with tqdm(loader, desc=description, disable=args.no_progress) as bar:
+        for batch_index, (frames, targets) in enumerate(bar, 1):
+            frames = frames.to(args.device, non_blocking=True)
+            optimizer.zero_grad(set_to_none=True)
+            big_mask, small_commit = random_training_schedule(
+                frames.shape[0], frames.shape[1], frames.device)
+            state, logits, boxes = None, [], []
+            for step in range(frames.shape[1]):
+                output, state = model.forward_selected(frames[:, step], state, big_mask[:, step], small_commit[:, step])
+                logits.append(output["class_logits"])
+                boxes.append(output["box_regression"])
+            logits, boxes = torch.stack(logits, 1), torch.stack(boxes, 1)
+            loss = criterion({"class_logits": logits, "box_regression": boxes,
+                              "anchors": output["anchors"]}, targets)
+            selections += int(big_mask.sum())
+            if not torch.isfinite(loss["total_loss"]):
+                raise FloatingPointError("Non-finite paired detector loss.")
+            loss["total_loss"].backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip, error_if_nonfinite=True)
+            optimizer.step()
+            current = {key: float(loss[key].detach()) for key in LOSS_KEYS}
+            for key in LOSS_KEYS:
+                totals[key] += current[key]
+            batches += 1
+            bar.set_postfix(loss_postfix(current, totals, batches))
+            log_every = getattr(args, "log_every", 50)
+            if batches == 1 or batches % log_every == 0:
+                print(f"{description}, batch {batches}: " + ", ".join(
+                    f"{key}={current[key]:.4f}/{totals[key]/batches:.4f}" for key in LOSS_KEYS), flush=True)
+            if args.max_batches is not None and batch_index >= args.max_batches:
+                break
+    if not batches:
+        raise ValueError("No complete training batches.")
+    print(f"Epoch {epoch} {phase} mean: " + ", ".join(
+        f"{key}={totals[key]/batches:.4f}" for key in LOSS_KEYS), flush=True)
+    return {**{key: value / batches for key, value in totals.items()}, "phase": phase, "optimizer_steps": batches,
+            "big_selections": selections, "skipped_batches": 0,
+            "big_shared_frozen": False}
+
 
 def train(model, train_data, val_data, optimizer, args, *, resume, metadata,
           sources, signatures, definition, early_stopping=False):
     """Train a prepared classification or detection run, validate, and save checkpoints."""
-    destination = Path(args.checkpoint_out)
     history, run_id = (list(resume['history']), resume['run_id']) if resume else ([], uuid.uuid4().hex)
-
-    def checkpoint(epoch, stats, budget, scheduler, validate):
-        rng = capture_rng()
-        was_training = model.training
-        metrics = None
-        if validate:
-            try:
-                seed_training(0)
-                if args.task == 'classification':
-                    val_args = copy(args)
-                    val_args.max_batches = None
-                    metrics = classification_epoch(model, val_data, val_args)
-                else:
-                    policy = PolicyConfig(mode='big' if model.standalone else 'fixed', interval=args.big_call_interval)
-                    metrics, _ = evaluate(model, val_data, policy,
-                        EvaluationOptions(args.device, score_threshold=0.,
-                                          warmup_frames=0, progress=not args.no_progress))
-            finally:
-                restore_rng(rng)
-                model.train(was_training)
-        if validate:
-            history.append({'epoch': epoch, 'train': stats, 'validation': metrics,
-                            'update': budget['updates']})
-        payload = {**lstm_metadata(model), 'matched_format_version': 1, 'stage': 'matched_' + args.task,
-                   'experiment': args.experiment, 'initialization_seed': args.seed,
-                   'protocol': {'bn_stats': 'frozen', 'standalone_memory': 'update', 'joint_memory': 'big_only'},
-                   'class_to_idx': {str(i): i - 1 for i in range(1, 31)},
-                   'category_id_to_label': metadata['category_id_to_label'], 'label_to_name': metadata['label_to_name'],
-                   'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'rng_state': capture_rng(),
-                   'selection_metric': (resume.get('selection_metric', 'bce_loss' if args.task == 'classification' else 'mAP@0.5')
-                                        if resume else 'micro_ap' if args.task == 'classification' else 'mAP@0.5'),
-                   'epoch': epoch, 'run_id': run_id, 'history': history, 'sources': sources,
-                   'training_signatures': signatures, 'run_definition': definition,
-                   'resume_arguments': saved_arguments(args)}
-        if args.task == 'classification' and model.backbone_only:
-            payload['classification_architecture'] = 'backbone_only'
-        payload.update(budget=budget, scheduler=scheduler, global_step=budget['updates'])
-        if early_stopping:
-            payload['early_stopping'] = True
-        save_matched_checkpoints(payload, destination, select_best=validate)
-        suffix = f" update {budget['updates']}"
-        print(f'Saved {args.experiment} {args.task} epoch {epoch}{suffix}: {destination}', flush=True)
-        if metrics:
-            key = payload['selection_metric']
-            print(f"Validation {key}={metrics[key]:.6f}; class coverage {len(metrics['present_classes'])}/30", flush=True)
-        return payload
-
-    return train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping)
-
-
-def train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early_stopping=False):
 
     if args.lr_schedule not in ('linear', 'cosine'):
         raise ValueError('Only linear and cosine training schedules are supported.')
@@ -146,7 +137,35 @@ def train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early
             budget['batch'] += count
             validate = budget['updates'] % args.validate_every == 0 or budget['updates'] == budget['total_updates']
             stats['interval_updates'] = count
-            payload = checkpoint(budget['epoch'], stats, dict(budget), scheduler.state_dict(), validate)
+            rng = capture_rng()
+            was_training = model.training
+            metrics = None
+            if validate:
+                try:
+                    seed_training(0)
+                    if args.task == 'classification':
+                        val_args = copy(args)
+                        val_args.max_batches = None
+                        metrics = classification_epoch(model, val_data, val_args)
+                    else:
+                        policy = LSTMPolicyConfig(mode='big' if model.standalone else 'fixed', interval=args.big_call_interval)
+                        metrics, _ = evaluate(model, val_data, policy,
+                            LSTMEvalConfig(args.device, score_threshold=0.,
+                                              warmup_frames=0, progress=not args.no_progress))
+                finally:
+                    restore_rng(rng)
+                    model.train(was_training)
+            if validate:
+                history.append({'epoch': budget['epoch'], 'train': stats, 'validation': metrics,
+                                'update': budget['updates']})
+            payload = save_training_checkpoint(model, optimizer, args,
+                epoch=budget['epoch'], budget=dict(budget), scheduler=scheduler.state_dict(),
+                validate=validate, resume=resume, metadata=metadata, sources=sources,
+                signatures=signatures, definition=definition, history=history, run_id=run_id,
+                early_stopping=early_stopping)
+            if metrics:
+                key = payload['selection_metric']
+                print(f"Validation {key}={metrics[key]:.6f}; class coverage {len(metrics['present_classes'])}/30", flush=True)
             if validate and early_stopping_reached(payload, early_stopping):
                 break
     finally:
@@ -154,56 +173,10 @@ def train_budgeted(model, train_data, args, optimizer, resume, checkpoint, early
     return payload
 
 
-def train_batches(model, loader, optimizer, criterion, args, epoch=1):
-    phase = "joint"
-    model.configure_detector_training()
-    totals, batches, selections, corrupted = dict.fromkeys(LOSS_KEYS, 0.), 0, 0, 0
-    corruption = MemoryCorruption(args.memory_corruption_probability, args.memory_dropout, args.memory_noise_std)
-    description = f"Epoch {epoch} {phase} (current/mean)"
-    with tqdm(loader, desc=description, disable=args.no_progress) as bar:
-        for batch_index, (frames, targets) in enumerate(bar, 1):
-            frames = frames.to(args.device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            big_mask, small_commit = random_training_schedule(
-                frames.shape[0], frames.shape[1], frames.device)
-            state, logits, boxes = None, [], []
-            for step in range(frames.shape[1]):
-                output, state = model.forward_selected(frames[:, step], state, big_mask[:, step], small_commit[:, step])
-                state, affected = corrupt_memory(state, big_mask[:, step], corruption)
-                corrupted += int(affected.sum())
-                logits.append(output["class_logits"])
-                boxes.append(output["box_regression"])
-            logits, boxes = torch.stack(logits, 1), torch.stack(boxes, 1)
-            loss = criterion({"class_logits": logits, "box_regression": boxes,
-                              "anchors": output["anchors"]}, targets)
-            selections += int(big_mask.sum())
-            if not torch.isfinite(loss["total_loss"]):
-                raise FloatingPointError("Non-finite paired detector loss.")
-            loss["total_loss"].backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip, error_if_nonfinite=True)
-            optimizer.step()
-            current = {key: float(loss[key].detach()) for key in LOSS_KEYS}
-            for key in LOSS_KEYS:
-                totals[key] += current[key]
-            batches += 1
-            bar.set_postfix(loss_postfix(current, totals, batches))
-            log_every = getattr(args, "log_every", 50)
-            if batches == 1 or batches % log_every == 0:
-                print(f"{description}, batch {batches}: " + ", ".join(
-                    f"{key}={current[key]:.4f}/{totals[key]/batches:.4f}" for key in LOSS_KEYS), flush=True)
-            if args.max_batches is not None and batch_index >= args.max_batches:
-                break
-    if not batches:
-        raise ValueError("No complete training batches.")
-    print(f"Epoch {epoch} {phase} mean: " + ", ".join(
-        f"{key}={totals[key]/batches:.4f}" for key in LOSS_KEYS), flush=True)
-    return {**{key: value / batches for key, value in totals.items()}, "phase": phase, "optimizer_steps": batches,
-            "big_selections": selections, "corrupted_updates": corrupted, "skipped_batches": 0,
-            "big_shared_frozen": False}
-
 def evaluate(model, dataset, policy, options=None,
                     precision_ids=None, on_prediction=None):
-    options = options or EvaluationOptions()
+    """Stream videos with per-video memory resets and report detection accuracy, timing, and routing."""
+    options = options or LSTMEvalConfig()
     precision_ids = set(precision_ids or [])
     device = torch.device(options.device)
     if policy.mode == "small" and precision_ids:
@@ -331,18 +304,3 @@ def evaluate(model, dataset, policy, options=None,
                     "detector_fingerprint": detector_fingerprint(model), "data_signature": data_signature(dataset),
                     "AP_definition": "Continuous precision-recall envelope AP at IoU 0.5; absent-GT classes omitted from mean."})
     return metrics, routes
-
-@dataclass(frozen=True)
-class EvaluationOptions:
-    device: str = "cpu"
-    score_threshold: float = 0.001
-    max_detections: int = 100
-    warmup_frames: int = 3
-    seed: int = 0
-    progress: bool = True
-    compute_losses: bool = True
-
-    def __post_init__(self):
-        probability(self.score_threshold, "Evaluation score threshold")
-        if self.max_detections < 1 or self.warmup_frames < 0:
-            raise ValueError("Invalid detection limit or warmup count.")

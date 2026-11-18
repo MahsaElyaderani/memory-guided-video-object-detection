@@ -1,23 +1,24 @@
 """Evaluation entry point: loads LSTM detectors and data, then calls the reusable evaluation engine."""
 from pathlib import Path
 
-from path import parse_paths
+from utils.path import parse_paths
 import argparse
 import json
 import time
 
 import torch
 
-from engine.trainer_lstm import EvaluationOptions, export_lstm_run, select_evaluation_frames
-from lstm_config import PolicyConfig
-from routing.data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
+from engine.trainer_lstm import export_lstm_run, select_evaluation_frames
+from utils.config import LSTMPolicyConfig, LSTMEvalConfig
+from utils.evaluation_data import add_data_arguments, selected_dataset, validate_native_categories, guard_held_out
 from utils.runtime import write_json, load_checkpoint
-from routing.predictions import sha256_file
-from utils.compute import synchronize
+from utils.runtime import sha256_file
+from utils.metric import synchronize
 
 
 @torch.no_grad()
 def benchmark_backbones(model, steps, warmup):
+    """Time batch-one backbone forwards on resident synthetic inputs, restoring module training modes."""
     if steps < 1 or warmup < 1:
         raise ValueError('Backbone benchmarking requires positive steps and warmup.')
     standalone = getattr(model, 'standalone', None)
@@ -54,7 +55,8 @@ def benchmark_backbones(model, steps, warmup):
 
 
 def load_evaluation_model(path):
-    from utils.lstm_checkpoints import model_from_matched
+    """Load and reconstruct a supported matched detection checkpoint with strict checks."""
+    from utils.checkpoint import model_from_matched
     payload = load_checkpoint(path)
     if payload.get('stage') != 'matched_detection':
         raise ValueError('Matched evaluation requires a matched detection checkpoint.')
@@ -62,6 +64,7 @@ def load_evaluation_model(path):
 
 
 def parse_args(argv=None):
+    """Parse evaluation policies, dataset paths, export options, and optional backbone timing."""
     parser = argparse.ArgumentParser(description="Evaluate the shared-memory VID pair: small, big or fixed.")
     add_data_arguments(parser)
     parser.add_argument("--checkpoint", required=True)
@@ -94,6 +97,7 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """Evaluate the requested LSTM policies and save predictions, metrics, and optional visualizations."""
     args = parse_args(argv)
     model, payload = load_evaluation_model(args.checkpoint)
     if getattr(model, 'standalone', None) and args.mode != 'big':
@@ -112,10 +116,10 @@ def main(argv=None):
         precision_ids = set(raw)
         if not precision_ids.issubset(dataset.routing_records):
             raise ValueError("Precision requests include unevaluated image IDs.")
-    options = EvaluationOptions(args.device, args.score_threshold, args.max_detections, args.warmup_frames,
+    options = LSTMEvalConfig(args.device, args.score_threshold, args.max_detections, args.warmup_frames,
                                  args.seed, not args.no_progress, not args.no_losses)
     modes = ("small", "big", "fixed") if args.mode == "all" else (args.mode,)
-    policies = {mode: PolicyConfig(mode, args.interval,
+    policies = {mode: LSTMPolicyConfig(mode, args.interval,
                                    args.scene_change_threshold, not args.keep_state_on_scene_change,
                                    args.memory_feedback) for mode in modes}
     if args.mode == "small" and precision_ids:

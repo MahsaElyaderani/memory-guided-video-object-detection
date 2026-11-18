@@ -3,19 +3,21 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from config import ModelConfig, SSDConfig
+from utils.config import ModelConfig, SSDConfig
 from models.anchors import SSDAnchorGenerator
-from models.backbones import TimmMobileNetV2Backbone
-from models.ssd_head import SSDBoxPredictor, SSDFeatureMaps
+from models.backbones import Backbone
+from models.ssd_head import SSDPredictionHeads, SSDFeaturePyramid
 
 
-class P4Student(nn.Module):
+class AttentionDetector(nn.Module):
+    """TinyNet-D/SSD student with optional spatial attention to cached teacher P4."""
     def __init__(self, memory, *, imagenet=False):
+        """Build the 64-channel student and fresh SSD heads; optionally load ImageNet weights."""
         super().__init__()
         if memory not in ('none', 'p4'):
             raise ValueError('Expected none or p4 memory.')
         self.memory = memory
-        backbone = TimmMobileNetV2Backbone(model_name='tinynet_d.in1k')
+        backbone = Backbone(model_name='tinynet_d.in1k')
         if imagenet:
             backbone.load_pretrained()
         net = backbone.network
@@ -24,13 +26,14 @@ class P4Student(nn.Module):
         self.blocks = net.blocks[:5]
         self.register_buffer('mean', backbone.input_mean)
         self.register_buffer('std', backbone.input_std)
-        self.feature_maps = SSDFeatureMaps(input_channels=64)
+        self.feature_maps = SSDFeaturePyramid(input_channels=64)
         self.ssd_cfg = SSDConfig()
-        self.predictor = SSDBoxPredictor((64, *ModelConfig().feature_channels[1:]), 30,
+        self.predictor = SSDPredictionHeads((64, *ModelConfig().feature_channels[1:]), 30,
                                          self.ssd_cfg.num_anchors_per_location, True)
         self.anchors = SSDAnchorGenerator()
 
     def forward(self, frames, cache=None):
+        """Return SSD logits, offsets, and anchors from 160px views and optional teacher cache."""
         if frames.shape[1:] != (3, 160, 160):
             raise ValueError('Expected 160 x 160 student RGB views.')
         student = self.blocks(self.stem(((frames + 1) * .5 - self.mean) / self.std))

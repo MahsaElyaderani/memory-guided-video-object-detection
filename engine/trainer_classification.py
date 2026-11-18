@@ -3,11 +3,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from datasets.dataloader import classification_collate
-from engine.evaluator import classification_metrics
+from utils.metric import classification_metrics
 from utils.runtime import tqdm
 
 
 def classification_epoch(model, dataset, args, optimizer=None, loader=None):
+    """Train with BCE across model steps, or validate using final-step classification predictions."""
     training = optimizer is not None
     model.train(training)
     if loader is None:

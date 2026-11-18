@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
 import json
 import math
 import os
@@ -20,12 +21,23 @@ ATTENTION_MEMORY_NAMES = {"none": "no_memory", "p4": "attention_memory"}
 LOSS_KEYS = ("total_loss", "classification_loss", "localization_loss")
 
 
+def sha256_file(path):
+    """Hash file contents in chunks to identify annotations, manifests, or checkpoints."""
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def seed_training(seed):
+    """Seed Python and PyTorch generators for reproducible training."""
     random.seed(seed)
     torch.manual_seed(seed)
 
 
 def save_matched_checkpoints(payload, destination, select_best=True):
+    """Save latest state and replace best only when the selected validation metric improves."""
     if not select_best:
         atomic_save_checkpoint(payload, destination)
         return
@@ -62,6 +74,7 @@ def early_stopping_reached(payload, enabled, destination=None):
 
 
 def loss_postfix(current, totals, count):
+    """Format current and running mean detection losses for progress reporting."""
     names = ("total", "cls", "loc")
     return {
         name: f"{current[key]:.4f}/{totals[key] / count:.4f}"
@@ -70,6 +83,7 @@ def loss_postfix(current, totals, count):
 
 
 def select_video_subset(dataset, max_videos=None, seed=0):
+    """Select reproducible video IDs and restrict clip indices to those videos."""
     if max_videos is not None:
         if max_videos < 1:
             raise ValueError("max_videos must be positive.")
@@ -116,6 +130,7 @@ def select_validation_frames(dataset, frames_per_video=None, seed=0):
 
 
 def atomic_save_checkpoint(payload, destination, overwrite=True):
+    """Publish a fully written checkpoint atomically, optionally refusing replacement."""
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(
@@ -145,10 +160,8 @@ def atomic_save_checkpoint(payload, destination, overwrite=True):
 
 
 def load_checkpoint(path):
-    try:
-        from config import ModelConfig, SSDConfig
-    except ImportError:
-        from ..config import ModelConfig, SSDConfig
+    """Load checkpoint data onto CPU using supported safe-loading options when available."""
+    from .config import ModelConfig, SSDConfig
     safe_globals = getattr(torch.serialization, 'safe_globals', None)
     if safe_globals is not None:
         with safe_globals([ModelConfig, SSDConfig]):
@@ -160,6 +173,7 @@ def load_checkpoint(path):
 
 
 def write_json(payload, path):
+    """Atomically replace a JSON report after writing and flushing its complete contents."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
@@ -176,6 +190,7 @@ def write_json(payload, path):
 
 @contextmanager
 def run_lock(destination):
+    """Hold an exclusive filesystem lock for one run and remove it on exit."""
     path = Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = path.with_name(path.name + ".lock")

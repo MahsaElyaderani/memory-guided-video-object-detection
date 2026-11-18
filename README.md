@@ -5,7 +5,11 @@
 Video object detection for the 30 ImageNet VID classes, using either LSTM memory
 or attention to a frozen teacher's cached keyframe features.
 
-Configure dataset and output paths in `path.py`. Launchers run from the project
+Dependencies for both workflows are listed in the root `requirements.txt`.
+Attention also requires the external Delta checkout and teacher weights configured
+in `utils/path.py`; these are not installed by the requirements file.
+
+Configure dataset and output paths in `utils/path.py`. Launchers run from the project
 root, activate the `vision` Conda environment, and use CUDA. Select the launcher's
 `train` action to start training or resume its latest checkpoints.
 
@@ -18,12 +22,12 @@ linear for classification and cosine for detection.
 | Responsibility | Main files |
 | --- | --- |
 | LSTM training and classification pretraining | `train_lstm_models.py`, `engine/trainer_classification.py`, `engine/trainer_lstm.py` |
-| LSTM architecture | `models/classification_pretraining.py`, `models/joint_lstm_detector.py`, `models/lstm_ssd_detector.py` |
-| Attention training and evaluation | `train_attention_models.py`, `engine/trainer_attention.py`, `models/attention_memory_detector.py`, `models/frozen_efficientdet_teacher.py` |
-| Shared feature extraction and detection | `models/backbones.py`, `models/ssd_head.py`, `losses/multibox_loss.py`, `engine/evaluator.py` |
+| LSTM architecture | `models/classifier.py`, `models/lstm_models.py` |
+| Attention training and evaluation | `train_attention_models.py`, `engine/trainer_attention.py`, `models/attention_models.py`, `models/efficientdet.py` |
+| Shared feature extraction and detection | `models/backbones.py`, `models/ssd_head.py`, `losses/multibox_loss.py`, `utils/metric.py` |
 | LSTM evaluation | `evaluate_lstm_models.py`, `engine/trainer_lstm.py` |
-| Prediction saving and video export | `engine/evaluator.py` |
-| Data, settings, and resume | `datasets/`, `path.py`, `config.py`, `lstm_config.py`, `utils/resume.py`, `utils/runtime.py` |
+| Prediction saving and video export | `utils/metric.py` |
+| Data, settings, and resume | `datasets/`, `utils/path.py`, `utils/config.py`, `utils/checkpoint.py`, `utils/runtime.py` |
 
 | Models | Launcher | Selection | Training |
 | --- | --- | --- | --- |
@@ -43,12 +47,12 @@ cached teacher features. Retrieved features are added to the student's 64-channe
 features and fed directly to SSD, without a projection. The baseline uses current
 features alone. Both students start from ImageNet-pretrained TinyNet-D and fresh SSD
 layers. Configure the external Delta fork, teacher weights,
-and validation manifest in `path.py`; the local `scripts/compare_vid.py` utility,
+and validation manifest in `utils/path.py`; the local `scripts/compare_vid.py` utility,
 OmegaConf, and pycocotools are also required.
 
 | Launcher defaults | LSTM experiments | Attention experiments |
 | --- | --- | --- |
-| Training subset | Fixed 25%; `TRAIN_SUBSET` accepts `0.25`, `0.5`, or a manifest path | `MATCHED_TRAIN_SUBSET` in `path.py` |
+| Training subset | Fixed 25%; `TRAIN_SUBSET` accepts `0.25`, `0.5`, or a manifest path | `MATCHED_TRAIN_SUBSET` in `utils/path.py` |
 | Classification | 5 epochs, batch 8, LR 0.01, linear decay | No separate classification stage |
 | Detection | 100 epochs, batch 4, LR 0.001, cosine decay | 100 epochs, batch 4, LR 0.001, cosine decay |
 | Optimizer | RMSprop | RMSprop |

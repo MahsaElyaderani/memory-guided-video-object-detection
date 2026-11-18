@@ -5,13 +5,12 @@ from PIL import Image
 from torch import nn
 
 from datasets.dataloader import budget_loader, collate_attention_clips
-from datasets.dataset_imagenetvid import TrainingPairs
+from datasets.dataset_imagenetvid import TrainingPairs, vid_to_dataset_labels
 from datasets.transforms import resize_detection_views
-from engine.evaluator import decode, export_attention_run
+from utils.metric import decode, export_attention_run
 from scripts.compare_vid import score_predictions
-from utils.checkpoints import capture_rng
+from utils.checkpoint import capture_rng
 from utils.runtime import tqdm, early_stopping_reached, ATTENTION_MEMORY_NAMES, save_matched_checkpoints
-from vid_categories import vid_to_dataset_labels
 
 def train_batches(student, teacher, loader, optimizer, scheduler, criterion, *, device, epoch):
     """Train one prepared slice of batches; keep batch-normalization statistics frozen."""
@@ -69,6 +68,7 @@ def train(student, teacher, pairs, selection, val, optimizer, scheduler, criteri
 
 @torch.no_grad()
 def evaluate(student, teacher, selection, dataset, device, on_prediction=None):
+    """Evaluate teacher keyframes every ten frames and intervening student frames, reporting both scopes."""
     student.eval()
     mapping = vid_to_dataset_labels(dataset)
     key_rows, small_rows, small_frames = [], [], []

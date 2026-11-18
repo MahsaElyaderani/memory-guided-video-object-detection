@@ -9,7 +9,7 @@ from pathlib import Path
 import argparse
 import sys
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYTHON = "/opt/homebrew/Caskroom/miniconda/base/envs/torch_env/bin/python3"
 
 # Verified local ImageNet VID layout. Change DATASET_ROOT when moving machines.
@@ -50,12 +50,13 @@ def resolve_path(value):
     if isinstance(value, (list, tuple)):
         return [resolve_path(item) for item in value]
     if not str(value).strip():
-        raise ValueError("Empty path in path.py; use None for an unset path.")
+        raise ValueError("Empty path in utils/path.py; use None for an unset path.")
     path = Path(value).expanduser()
     return str(path if path.is_absolute() else PROJECT_ROOT / path)
 
 
 def task_paths(task):
+    """Resolve configured input and output defaults for one command."""
     values = {}
     if task == "train_matched":
         values.update(annotations=TRAIN_ANNOTATIONS, frames_root=TRAIN_FRAMES,
@@ -107,6 +108,7 @@ def parse_paths(parser, task, argv=None):
 
 
 def required_path(name):
+    """Resolve a named uppercase setting and reject unknown or unset values."""
     if name not in globals() or not name.isupper():
         raise ValueError(f"Unknown path setting: {name}")
     value = resolve_path(globals()[name])

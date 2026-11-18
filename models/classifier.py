@@ -2,18 +2,19 @@
 import torch
 from torch import nn
 from datasets.frame_views import PairedFrames, big_frames
-from models.lstm_ssd_detector import LSTMSSD
-from models.joint_lstm_detector import JointLSTMDetector, select_memory
+from models.lstm_models import LSTMDetectorCore, LSTMDetector, select_memory
 from routing.backbone_schedule import random_training_schedule
 
 
-class JointClassifier(nn.Module):
+class PretrainClassifier(nn.Module):
+    """Multi-label pretraining model: backbone-only standalone or recurrent joint."""
     def __init__(self, model_config, paired_config, num_classes, *, detector=None):
+        """Reuse detector backbones and, for joint models, its LSTM; add a classification head."""
         super().__init__()
         if num_classes < 2:
             raise ValueError('Classification requires at least two classes.')
         # Reuse the exact detector topology, but retain no detection heads or anchors.
-        pair = detector if detector is not None else JointLSTMDetector(LSTMSSD(model_config), paired_config)
+        pair = detector if detector is not None else LSTMDetector(LSTMDetectorCore(model_config), paired_config)
         self.standalone = getattr(pair, 'standalone', None)
         self.backbone_only = bool(self.standalone)
         self.model_cfg, self.paired_config = model_config, paired_config
@@ -28,6 +29,7 @@ class JointClassifier(nn.Module):
         self.num_classes = num_classes
 
     def train(self, mode=True):
+        """Set training mode while respecting the frozen BatchNorm-statistics setting."""
         super().train(mode)
         if mode and self.paired_config.freeze_bn_stats:
             for layer in self.modules():
@@ -36,6 +38,7 @@ class JointClassifier(nn.Module):
         return self
 
     def forward(self, frames, steps=3, use_big=None):
+        """Return raw class logits [B,T,C]; standalone uses T=1, joint repeats the image."""
         if steps < 1 or frames.ndim != 4 or big_frames(frames).shape[1:] != (3, 320, 320):
             raise ValueError('Expected a batch of 320 RGB views and positive unroll length.')
         if self.backbone_only:
@@ -70,6 +73,7 @@ class JointClassifier(nn.Module):
         return torch.stack(logits, 1)
 
     def transfer_to_detector(self, detector):
+        """Copy compatible pretrained components without replacing detection heads."""
         if self.standalone != getattr(detector, 'standalone', None):
             raise ValueError('Classification and detection branch layouts differ.')
         if (self.model_cfg != detector.model_cfg or

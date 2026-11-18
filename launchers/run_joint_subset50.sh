@@ -5,7 +5,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate vision
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-RUNS="$(python path.py --get RUNS_DIR)"
+RUNS="$(python utils/path.py --get RUNS_DIR)"
 # Optional first argument overrides the source best checkpoint for the first run.
 BEST="${1:-$RUNS/matched_subset25_cosine_100epochs_9fjlhg/seed_0/joint_120d/detection_best.pt}"
 OUT="$RUNS/joint_120d_subset50_cosine_continued/detection.pt"

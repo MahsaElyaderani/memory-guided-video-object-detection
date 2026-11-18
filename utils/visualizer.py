@@ -1,3 +1,4 @@
+"""Reusable rendering of detection boxes, ground truth, annotated frames, and videos."""
 import math
 from pathlib import Path
 
@@ -10,6 +11,7 @@ PRED_COLOR = (0, 170, 255)
 
 
 def draw_box(image, normalized_box, caption, color):
+    """Draw a normalized box and caption onto the supplied image in place."""
     height, width = image.shape[:2]
     x1, y1, x2, y2 = normalized_box
     x1, x2 = np.clip([x1 * width, x2 * width], 0, width - 1).round().astype(int)
@@ -25,6 +27,7 @@ def draw_box(image, normalized_box, caption, color):
 
 
 def captioned(image, caption):
+    """Return an image with a caption strip above it."""
     header = np.full((36, image.shape[1], 3), 24, dtype=np.uint8)
     cv2.putText(header, caption, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                 (255, 255, 255), 1, cv2.LINE_AA)
@@ -34,6 +37,7 @@ def captioned(image, caption):
 def render_frame(bgr, target, prediction, class_names, variant,
                  draw_score_threshold=0.3, layout='side-by-side', max_side=960,
                  model_only_titles=False):
+    """Render ground truth and thresholded predictions in overlay or side-by-side layout."""
     if layout not in ('side-by-side', 'overlay'):
         raise ValueError('Unknown rendering layout.')
     if max_side < 1 or not 0 <= draw_score_threshold <= 1:
@@ -68,8 +72,10 @@ def render_frame(bgr, target, prediction, class_names, variant,
 
 
 class DetectionVideoExporter:
+    """Write per-video detection visualizations and optional sampled still frames."""
     def __init__(self, dataset, output_dir, variant, draw_score_threshold=.3, max_side=640,
                  playback_fps=30., save_frames_every=30):
+        """Validate rendering options and create fresh visualization output directories."""
         if (not 0 <= draw_score_threshold <= 1 or max_side < 1 or save_frames_every < 0 or
                 not math.isfinite(playback_fps) or playback_fps <= 0):
             raise ValueError("Invalid visualization settings.")
@@ -81,11 +87,13 @@ class DetectionVideoExporter:
         self.writer, self.current, self.shape, self.video_index = None, None, None, []
 
     def close(self):
+        """Release the current video writer if one is open."""
         if self.writer is not None:
             self.writer.release()
             self.writer = None
 
     def __call__(self, record, target, prediction, route):
+        """Render and append one frame, switching writers at video boundaries."""
         image = cv2.imread(str(self.dataset.frames_root / record["file_name"]))
         if image is None or image.shape[:2] != (int(record["height"]), int(record["width"])):
             raise ValueError("Visualization frame missing or dimensions differ.")

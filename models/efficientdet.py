@@ -7,8 +7,10 @@ from torch.nn import functional as F
 
 
 class EfficientDetTeacher:
+    """Frozen external EfficientDet adapter providing keyframe detections and P4 memory."""
     def __init__(self, root, checkpoint, device):
         # The fork's script imports its sibling tracking module by bare name.
+        """Load the Delta fork checkpoint on the selected device and freeze all teacher weights."""
         script = root.resolve() / 'baseline/evaluate_tracking.py'
         paths = sys.path.copy()
         try:
@@ -24,6 +26,7 @@ class EfficientDetTeacher:
 
     @torch.no_grad()
     def keyframe(self, images, *, detect=False):
+        """Return P4 keys [B,64,1024], values [B,1024,64], validity mask, and optional detections."""
         sizes = [im.size for im in images]
         batch = [self.transform(im, {'img_size': im.size}) for im in images]
         pixels = torch.from_numpy(np.stack([p for p, _ in batch])).to(self.device, torch.float32)

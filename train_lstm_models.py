@@ -11,18 +11,19 @@ import torch
 from datasets.dataset_imagenetvid import ClassificationDataset
 from engine import trainer_lstm as trainer
 from models.lstm_models import EXPERIMENTS, build_model
-from path import parse_paths, RUNS_DIR
-from routing.data import data_signature, guard_held_out, selected_dataset, validate_native_categories
+from utils.path import parse_paths, RUNS_DIR
+from utils.evaluation_data import data_signature, guard_held_out, selected_dataset, validate_native_categories
 from datasets.transforms import TrainTransform
 from utils.evaluation_data import select_evaluation_frames
-from utils.checkpoints import restore_rng
-from utils.lstm_checkpoints import model_from_matched
+from utils.checkpoint import restore_rng
+from utils.checkpoint import model_from_matched
 from utils.runtime import run_lock, load_checkpoint, atomic_save_checkpoint, seed_training
-from routing.predictions import sha256_file
-from utils.resume import resume_defaults, saved_arguments, restore_optimizer
+from utils.runtime import sha256_file
+from utils.checkpoint import resume_defaults, saved_arguments, restore_optimizer
 
 def parse_args(argv=None):
-    from routing.data import add_data_arguments
+    """Parse stage and experiment options, inject configured paths, and restore omitted resume defaults."""
+    from utils.evaluation_data import add_data_arguments
     parser = argparse.ArgumentParser(description=__doc__)
     add_data_arguments(parser)
     parser.add_argument("--val-annotations")
@@ -80,11 +81,11 @@ def parse_args(argv=None):
         parser.error('Classification starts from official timm weights, not another experiment')
     if args.task == 'detection' and not args.resume:
         args.init_checkpoint = args.init_checkpoint or str(directory / 'classification.pt')
-    args.memory_corruption_probability, args.memory_dropout, args.memory_noise_std = 0., .1, .1
     return args
 
 
 def checkpoint_position(payload):
+    """Read the saved epoch and within-epoch batch offset."""
     return payload['epoch'], payload.get('budget', {}).get('batch', 0)
 
 
@@ -127,6 +128,7 @@ def expand_subset_checkpoint(resume, definition, signatures, args):
 
 
 def build_training_data(args, model, metadata):
+    """Prepare training and validation datasets with matching categories and held-out checks."""
     if (min(args.epochs, args.batch_size, args.clip_length, args.clip_stride, args.prefetch_factor,
             args.big_call_interval) < 1 or args.num_workers < 0 or
             args.max_batches is not None and args.max_batches < 1 or
@@ -158,9 +160,17 @@ def build_training_data(args, model, metadata):
 
 
 def train(args):
+    """Set up models, initialization, data, optimizer, and resume state before calling the training engine."""
     requested_stop = vars(args).pop('early_stopping', None)
     expanding = vars(args).pop('expand_subset', False)  # One-time action, never inherited on resume.
     resume = load_checkpoint(args.resume) if args.resume else None
+    if resume:
+        # Drop retired, disabled settings in memory; never rewrite the source checkpoint.
+        for saved in (resume.get('resume_arguments', {}), resume.get('run_definition', {}).get('arguments', {})):
+            if saved.get('memory_corruption_probability', 0.) != 0.:
+                raise ValueError('Memory-corruption training is retired; use the archived trainer for this checkpoint.')
+            for key in ('memory_corruption_probability', 'memory_dropout', 'memory_noise_std'):
+                saved.pop(key, None)
     if resume and not resume.get('budget'):
         raise ValueError('Constant-LR resume is retired; use the archived trainer. Checkpoint evaluation remains supported.')
     early_stopping = resume.get('early_stopping', False) if resume and requested_stop is None else bool(requested_stop)

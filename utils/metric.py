@@ -5,9 +5,9 @@ from collections import defaultdict
 from typing import Dict, List, Sequence
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
+from datasets.frame_views import PairedFrames
 from torchvision.ops import nms
-from routing.predictions import detection
 
 try:
     from utils.runtime import tqdm
@@ -20,7 +20,45 @@ except ImportError:
     from ..models.anchors import BoxCoderScales, decode_boxes
 
 
+def detection(boxes=(), scores=(), labels=(), num_classes=30):
+    """Validate normalized boxes, scores, and foreground labels; return detached CPU copies."""
+    boxes = torch.as_tensor(boxes, dtype=torch.float32).detach().cpu().reshape(-1, 4)
+    scores = torch.as_tensor(scores, dtype=torch.float32).detach().cpu().reshape(-1)
+    raw_labels = torch.as_tensor(labels).detach().cpu().reshape(-1)
+    if raw_labels.numel() and (not torch.isfinite(raw_labels).all() or
+                               not torch.equal(raw_labels, raw_labels.round())):
+        raise ValueError('Detection labels must be finite integers.')
+    labels = raw_labels.to(torch.long)
+    if not (len(boxes) == len(scores) == len(labels)):
+        raise ValueError('Detection boxes, scores and labels must align.')
+    if not torch.isfinite(boxes).all() or not torch.isfinite(scores).all():
+        raise ValueError('Non-finite detection data.')
+    if ((boxes < 0) | (boxes > 1)).any() or ((scores < 0) | (scores > 1)).any():
+        raise ValueError('Boxes must be normalized xyxy; scores must be in [0,1].')
+    if len(boxes) and ((boxes[:, 2:] < boxes[:, :2]).any() or
+                       (labels < 1).any() or (labels > num_classes).any()):
+        raise ValueError('Reversed box corners or out-of-range foreground labels.')
+    return {'boxes': boxes.clone(), 'scores': scores.clone(), 'labels': labels.clone()}
+
+
+def validated(prediction, num_classes=30):
+    """Validate an existing prediction dictionary using the standard detection representation."""
+    return detection(prediction['boxes'], prediction['scores'], prediction['labels'], num_classes)
+
+
+def filtered(prediction, threshold=0.05, maximum=100):
+    """Keep scores above the threshold and return the highest-scoring detections, preserving tie order."""
+    if not 0 <= threshold <= 1 or maximum < 1:
+        raise ValueError('Invalid detection filter.')
+    result = validated(prediction)
+    keep = torch.nonzero(result['scores'] >= threshold).flatten()
+    order = torch.argsort(result['scores'][keep], descending=True, stable=True)
+    keep = keep[order[:maximum]]
+    return {key: value[keep] for key, value in result.items()}
+
+
 def decode(output, model, threshold, maximum=100):
+    """Reject non-finite detector outputs, decode SSD boxes, and validate filtered detections."""
     for key in ("class_logits", "box_regression"):
         if not torch.isfinite(output[key]).all():
             raise FloatingPointError("Non-finite detector output.")
@@ -31,6 +69,7 @@ def decode(output, model, threshold, maximum=100):
 
 
 def _box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+    """Compute pairwise IoU for xyxy boxes, including empty inputs."""
     if boxes1.numel() == 0 or boxes2.numel() == 0:
         return boxes1.new_zeros((boxes1.shape[0], boxes2.shape[0]))
     lt = torch.maximum(boxes1[:, None, :2], boxes2[None, :, :2])
@@ -108,6 +147,7 @@ def _continuous_ap(recalls: Tensor, precisions: Tensor) -> float:
 
 
 def class_coverage(counts):
+    """Report positive counts and present or absent foreground classes."""
     counts = {i + 1: int(count) for i, count in enumerate(counts)}
     return {'positive_counts_per_class': counts,
             'present_classes': [i for i, count in counts.items() if count],
@@ -218,7 +258,7 @@ def export_lstm_run(model, dataset, policy, options, output_dir,
     from utils.evaluation_data import raw_detection_row
     from utils.runtime import write_json
     from dataclasses import asdict
-    from engine.visualizer import DetectionVideoExporter
+    from utils.visualizer import DetectionVideoExporter
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=False)
     write_json({"status": "running"}, output / "run_status.json")
@@ -226,6 +266,7 @@ def export_lstm_run(model, dataset, policy, options, output_dir,
     try:
         with (output / "detections.jsonl").open("x") as detections, (output / "routing.jsonl").open("x") as routing:
             def save(record, target, prediction, route):
+                """Write one frame prediction and routing record, optionally rendering its visualization."""
                 row = raw_detection_row(record, target, prediction, dataset.label_to_name)
                 row["route"] = route
                 detections.write(json.dumps(row, allow_nan=False) + "\n")
@@ -258,7 +299,7 @@ def export_attention_run(student, teacher, selection, dataset, device, output, v
     from collections import Counter
     import json
     from engine.trainer_attention import evaluate
-    from engine.visualizer import DetectionVideoExporter
+    from utils.visualizer import DetectionVideoExporter
     from utils.evaluation_data import normalized_target, raw_detection_row
     from utils.runtime import write_json, ATTENTION_MEMORY_NAMES
 
@@ -272,6 +313,7 @@ def export_attention_run(student, teacher, selection, dataset, device, output, v
         with (output/'detections.jsonl').open('x') as stream:
             def save(frame, rows, step):
                 # Match score_predictions: discard degenerate boxes, retain top 100 per frame.
+                """Format and save teacher/student predictions for one frame, optionally rendering it."""
                 rows = sorted((r for r in rows if r['bbox'][2] > 0 and r['bbox'][3] > 0),
                               key=lambda r: r['score'], reverse=True)[:100]
                 width, height = frame['original_size']
@@ -311,3 +353,51 @@ def export_attention_run(student, teacher, selection, dataset, device, output, v
             exporter.close()
         write_json({'status': 'failed', 'error': str(error)}, output/'run_status.json')
         raise
+
+
+# Profiling and timing.
+@torch.no_grad()
+def profile_conv_linear(module, forward):
+    """Count executed Conv2d and Linear MACs using temporary hooks; restore all training modes."""
+    total, handles = [0], []
+    modes = [(child, child.training) for child in module.modules()]
+    def hook(child, inputs, output):
+        """Accumulate multiply-accumulate counts from convolution or linear output dimensions."""
+        if isinstance(child, nn.Conv2d):
+            total[0] += output.numel() * (child.in_channels // child.groups) * child.kernel_size[0] * child.kernel_size[1]
+        elif isinstance(child, nn.Linear):
+            total[0] += output.numel() * child.in_features
+    module.eval()
+    try:
+        for child in module.modules():
+            if isinstance(child, (nn.Conv2d, nn.Linear)):
+                handles.append(child.register_forward_hook(hook))
+        forward()
+    finally:
+        for handle in handles:
+            handle.remove()
+        for child, mode in modes:
+            child.training = mode
+    return total[0]
+
+
+def synchronize(device):
+    """Wait for CUDA operations when timing on a CUDA device."""
+    if torch.device(device).type == 'cuda':
+        torch.cuda.synchronize(device)
+
+
+def profiled_costs(model, device, warmup):
+    """Profile each detector branch and warm up forward passes using synthetic frame views."""
+    frame = torch.zeros(1, 3, model.model_cfg.image_size, model.model_cfg.image_size, device=device)
+    if model.model_cfg.uses_timm:
+        frame = PairedFrames(frame, torch.zeros(1, 3, 160, 160, device=device))
+    state = model.initial_state(frame)
+    with torch.no_grad():
+        big = profile_conv_linear(model, lambda: model.forward_big(frame, state))
+        small = profile_conv_linear(model, lambda: model.forward_small(frame, state))
+        for _ in range(warmup):
+            model.forward_big(frame, state)
+            model.forward_small(frame, state)
+    synchronize(device)
+    return {"big": big, "small": small}

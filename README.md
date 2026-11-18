@@ -1,4 +1,4 @@
-# Mobile VOD
+# Memory-Guided Video Object Detection
 
 Efficient video object detection for the **30 ImageNet VID classes**: can a small
 model use memory from a larger model to improve accuracy at lower inference cost?

@@ -10,36 +10,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from .frame_views import stack_frames
 
-
-def configure_worker_sharing(worker_id, strategy):
-    """Apply the requested tensor-sharing strategy inside a spawned worker."""
-    # Spawned workers do not inherit the parent's Python module settings.
-    torch.multiprocessing.set_sharing_strategy(strategy)
-
-
-def classification_collate(batch):
-    """Stack image views and their 30-class multi-hot targets into a batch."""
-    images, labels = zip(*batch)
-    return stack_frames(images), torch.stack(labels)
-
-
-def collate_attention_clips(batch):
-    """Keep teacher keyframes as a list; stack student clips and retain variable-length box targets."""
-    keys, current, targets = zip(*batch)
-    return list(keys), torch.stack(current), list(targets)
-
-
-def collate_lstm_clips(batch: Sequence[Tuple[Tensor, list[dict]]]):
-    """Stack equal-length clips (including both RGB views); keep per-frame box targets as lists."""
-    if not batch:
-        raise ValueError("Cannot collate an empty batch.")
-    frames, targets = zip(*batch)
-    first_shape = tuple(frames[0].shape)
-    if any(tuple(x.shape) != first_shape for x in frames):
-        raise ValueError("All clips in a batch must have the same [T,C,H,W] shape.")
-    return stack_frames(frames, dim=0), list(targets)
-
-
 def build_dataloader(
     dataset: Dataset,
     batch_size: int,
@@ -76,7 +46,6 @@ def build_dataloader(
         **loader_options,
     )
 
-
 class SeededSamples(Dataset):
     """Opt-in reproducible augmentation, independent of worker count/prefetch."""
     def __init__(self, dataset, seed):
@@ -99,7 +68,6 @@ class SeededSamples(Dataset):
         finally:
             random.setstate(state)
 
-
 def budget_loader(dataset, args, epoch, start_batch, batches, *, collate_fn=None):
     """Rebuild only the unconsumed slice of a deterministic epoch permutation."""
     seed = args.seed + epoch
@@ -119,3 +87,31 @@ def budget_loader(dataset, args, epoch, start_batch, batches, *, collate_fn=None
                       pin_memory=torch.device(args.device).type == 'cuda',
                       collate_fn=collate_fn or (classification_collate if args.task == 'classification' else collate_lstm_clips),
                       **options)
+
+def configure_worker_sharing(worker_id, strategy):
+    """Apply the requested tensor-sharing strategy inside a spawned worker."""
+    # Spawned workers do not inherit the parent's Python module settings.
+    torch.multiprocessing.set_sharing_strategy(strategy)
+
+
+def classification_collate(batch):
+    """Stack image views and their 30-class multi-hot targets into a batch."""
+    images, labels = zip(*batch)
+    return stack_frames(images), torch.stack(labels)
+
+
+def collate_attention_clips(batch):
+    """Keep teacher keyframes as a list; stack student clips and retain variable-length box targets."""
+    keys, current, targets = zip(*batch)
+    return list(keys), torch.stack(current), list(targets)
+
+
+def collate_lstm_clips(batch: Sequence[Tuple[Tensor, list[dict]]]):
+    """Stack equal-length clips (including both RGB views); keep per-frame box targets as lists."""
+    if not batch:
+        raise ValueError("Cannot collate an empty batch.")
+    frames, targets = zip(*batch)
+    first_shape = tuple(frames[0].shape)
+    if any(tuple(x.shape) != first_shape for x in frames):
+        raise ValueError("All clips in a batch must have the same [T,C,H,W] shape.")
+    return stack_frames(frames, dim=0), list(targets)

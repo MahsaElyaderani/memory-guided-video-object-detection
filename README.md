@@ -170,6 +170,17 @@ For code review: launchers → `train_lstm_models.py` / `train_attention_models.
 `utils/checkpoint.py` handles resume; `utils/metric.py` and `utils/visualizer.py`
 handle metrics, predictions, and visual exports.
 
+## Pretrained checkpoint
+
+| Model | Download | Training and evaluation status |
+| --- | --- | --- |
+| Joint EfficientNet-LSTM | [Best checkpoint](https://github.com/MahsaElyaderani/memory-guided-video-object-detection/releases/download/efficientnet-lstm-joint-full-v1/efficientnet_lstm_joint_full_best.pt) · [Release notes and checksum](https://github.com/MahsaElyaderani/memory-guided-video-object-detection/releases/tag/efficientnet-lstm-joint-full-v1) | Completed cosine budget through 25% → 50% → full training data; best selected on validation subset. Full-validation results pending. |
+
+The release records the compatible code commit and preserves the complete checkpoint.
+Save the downloaded copy as
+`runs/experiments/lstm/efficientnet/joint/train25_to50_to100_seed0/detection_best.pt`
+without overwriting existing checkpoints. Configure dataset paths before evaluation.
+
 ## Evaluation
 
 For the organized experiment collection, `bash launchers/run_full_experiments.sh all`

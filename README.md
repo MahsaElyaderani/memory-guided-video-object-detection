@@ -199,11 +199,27 @@ for videos. Full-data training does not imply full-validation evaluation.
 
 For LSTM/Delta comparisons, [`scripts/compare_vid.py`](scripts/compare_vid.py) evaluates
 one shared manifest at interval 10 and reports both COCO AP50 (101 recall points)
-and continuous-envelope AP50. Its `export` command currently creates only the
-100×20 subset. Full-validation manifest export needs extending before a reproducible
-full LSTM/Delta benchmark. Attention evaluation additionally rejects a manifest
-that differs from its checkpoint: evaluating existing attention checkpoints on full
-validation needs a deliberate evaluation-only change, not editing checkpoint hashes.
+and continuous-envelope AP50. Its `export` command creates the 100×20 subset;
+for a full LSTM/Delta comparison, pass the full `selection.json` exported by
+attention evaluation below to its `compare --manifest` option.
+
+**Full attention validation:** use the original training-validation manifest for
+checkpoint verification and add `--full-validation`. This evaluates every frame
+in the same validation JSON at interval 10; training, resume, and best-checkpoint
+selection remain unchanged. Set `CHECKPOINT` to the chosen best student checkpoint:
+
+```bash
+python train_attention_models.py eval --memory attention_memory --checkpoint "$CHECKPOINT" \
+  --full-validation --device cuda --output-dir "results/attention_full_val_$(date +%Y%m%d_%H%M%S)"
+```
+
+Use `--memory no_memory` for the baseline; add `--visuals` for videos.
+If training used a non-default manifest, pass that original file with `--manifest`.
+The output saves the full `selection.json`, predictions, whole-sequence and
+student-frame AP50, and separate training/evaluation manifest hashes. Compare
+whole-sequence **continuous AP50** with the LSTM evaluator's `mAP@0.5`.
+The shared attention launcher still uses subset evaluation; this flag is available
+through the direct Python command only.
 
 Use identical validation frames, class mappings and scoring, synchronous float
 inference, and video-boundary memory resets. Include keyframe cost; report

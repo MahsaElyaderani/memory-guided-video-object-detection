@@ -13,7 +13,7 @@ from utils.runtime import run_lock, ATTENTION_MEMORY_NAMES, load_checkpoint, wri
 from utils.checkpoint import restore_rng
 from utils.evaluation_data import data_signature, guard_held_out, selected_dataset
 from utils.runtime import sha256_file
-from scripts.compare_vid import load_manifest
+from scripts.compare_vid import load_manifest, frame_manifest
 from models.efficientdet import EfficientDetTeacher
 from models.attention_models import AttentionDetector
 from losses.multibox_loss import criterion_for
@@ -26,6 +26,9 @@ from engine.trainer_attention import evaluate, export_attention_run
 
 def run(args):
     """Prepare or restore an experiment before invoking the engine."""
+    full_validation = getattr(args, 'full_validation', False)
+    if full_validation and args.action != 'eval':
+        raise ValueError('--full-validation is evaluation-only.')
     selection, val = load_manifest(SimpleNamespace(annotations=args.val_annotations, frames_root=args.val_frames,
                                                   manifest=args.manifest))
     manifest_hash = sha256_file(args.manifest)
@@ -40,6 +43,14 @@ def run(args):
                   saved['category_id_to_label'] != val.category_id_to_label or
                   saved['manifest_sha256'] != manifest_hash):
         raise ValueError('Incompatible experiment/projection, teacher, categories or validation manifest.')
+    if full_validation:
+        # Keep the saved manifest checks above; expand only evaluation, never training validation.
+        val = selected_dataset(SimpleNamespace(annotations=args.val_annotations, frames_root=args.val_frames,
+                                               video_ids=None, max_videos=None, subset_seed=7))
+        frames = frame_manifest(val)
+        selection = dict(format_version=1, annotations_sha256=selection['annotations_sha256'],
+                         class_names=selection['class_names'], num_frames=len(frames), num_videos=len(val.video_ids),
+                         subset_seed=None, frames_per_video=None, frames=frames)
     defaults = dict(epochs=100, batch_size=4, learning_rate=.001, seed=0, validate_every=5000, max_batches=None)
     for name, default in defaults.items():
         if getattr(args, name) is None:
@@ -55,8 +66,12 @@ def run(args):
     if args.action == 'eval':
         if args.output_dir:
             metrics = trainer.export_attention_run(student, teacher, selection, val, args.device, args.output_dir, args.visuals)
+            provenance = (dict(evaluation_scope='full_validation', training_manifest_sha256=manifest_hash)
+                          if full_validation else {})
             write_json(dict(checkpoint=str(args.checkpoint.resolve()), updates=saved['updates'], run_id=saved['run_id'],
-                            teacher_sha256=teacher_hash, manifest_sha256=manifest_hash), args.output_dir/'evaluation_source.json')
+                            teacher_sha256=teacher_hash,
+                            manifest_sha256=sha256_file(args.output_dir/'selection.json') if full_validation else manifest_hash,
+                            **provenance), args.output_dir/'evaluation_source.json')
         else:
             metrics = trainer.evaluate(student, teacher, selection, val, args.device)
         print(json.dumps(metrics, indent=2))
@@ -128,6 +143,8 @@ def main():
     parser.add_argument('--teacher-checkpoint', type=Path)
     parser.add_argument('--subset', type=Path, default=path.MATCHED_TRAIN_SUBSET)
     parser.add_argument('--manifest', type=Path, default=path.P4_VALIDATION_MANIFEST)
+    parser.add_argument('--full-validation', action='store_true',
+                        help='Eval only: use all validation frames, retaining checks against the original saved manifest')
     parser.add_argument('--train-annotations', type=Path, default=path.TRAIN_ANNOTATIONS)
     parser.add_argument('--train-frames', type=Path, default=path.TRAIN_FRAMES)
     parser.add_argument('--val-annotations', type=Path, default=path.VAL_ANNOTATIONS)
@@ -143,6 +160,8 @@ def main():
     parser.add_argument('--seed', type=int)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
+    if args.full_validation and args.action != 'eval':
+        parser.error('--full-validation is evaluation-only.')
     args.memory = {v: k for k, v in ATTENTION_MEMORY_NAMES.items()}.get(args.memory, args.memory)
     if (args.output_dir or args.visuals) and args.action != 'eval':
         parser.error('Exports are evaluation-only.')

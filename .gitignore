@@ -26,6 +26,7 @@ venv/
 *.sh
 !/launchers/run_lstm_experiments.sh
 !/launchers/run_attention_experiments.sh
+!/launchers/run_full_experiments.sh
 !/launchers/run_joint_subset50.sh
 !/launchers/run_joint_interval_analysis.sh
 !/launchers/show_train_history.sh

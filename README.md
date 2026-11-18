@@ -172,6 +172,15 @@ handle metrics, predictions, and visual exports.
 
 ## Evaluation
 
+For the organized experiment collection, `bash launchers/run_full_experiments.sh all`
+continues joint MobileNetV2, trains/resumes the four standalone models and both
+full-data attention variants with early stopping, then evaluates all eight best
+checkpoints on full validation at interval 10 (standalones use their sole branch).
+The completed joint EfficientNet-LSTM is evaluated only. Use `train` or `eval`
+instead of `all` for separate phases. This launcher requires the local
+`runs/experiments/train.sh`, organized checkpoints, and manifests copied to the server;
+they are not supplied by Git. Attention FPS/GFLOPs are not yet reported.
+
 Replace `train` with `eval` in the launcher commands above, retaining the same
 `TRAIN_SUBSET` and `RUN_NAME`. LSTM evaluation requires all three best checkpoints;
 attention requires both. Results go to a fresh folder under `results/`.
@@ -238,8 +247,14 @@ but its recorded validation is still a subset; it must be evaluated on full vali
 | --- | --- | ---: | --- | --- |
 | Looking Fast and Slow, Table 2: synchronous, non-quantized, no extra COCO | 1 big + 9 small | 58.9 | 0.190 GMAC | 23.5 (Pixel 3) |
 | Delta Distillation, published Table 1: EfficientDet-D0 + Delta | 1 teacher + 9 student | 66.1 | 0.71 G multiply-adds | Not reported in table |
-| Joint MobileNetV2-LSTM, this project | 1 big + 9 small | Pending | Pending | Pending |
-| Joint EfficientNet-LSTM, this project | 1 big + 9 small | Pending | Pending | Pending |
+| Joint MobileNetV2-LSTM (this repo) | 1 big + 9 small | Pending | Pending | Pending |
+| Joint EfficientNet-LSTM (this repo) | 1 big + 9 small | Pending | Pending | Pending |
+| Joint EfficientNet-attention (this repo) | 1 teacher + 9 student | Pending | Pending | Pending |
+
+Here **EfficientNet-attention** means frozen EfficientDet-D0 teacher + TinyNet-D
+attention-memory student. Only the student is trained; this is not joint optimization
+of both networks. Attention evaluation currently reports AP50 but not FPS/GFLOPs;
+those measurements remain pending a comparable benchmark.
 
 Paper rows are **reference results, not matched reruns**: see
 [Looking Fast and Slow, Table 2](https://arxiv.org/pdf/1903.10172) and
@@ -252,9 +267,9 @@ that with the published table or assume downloaded weights reproduce its 66.1 ro
 
 | Full-train/full-val ablation | Small / no-memory AP50 | Big standalone AP50 | Joint / attention-memory AP50 |
 | --- | ---: | ---: | ---: |
-| MobileNetV2 + LSTM | Pending | Pending | Pending |
-| TinyNet-D / EfficientNet-B0 + LSTM | Pending | Pending | Pending |
-| TinyNet-D attention experiment (whole sequence, teacher keyframes in both variants) | Pending | — | Pending |
+| MobileNetV2-LSTM | Pending | Pending | Pending |
+| TinyNet-D / EfficientNet-B0-LSTM | Pending | Pending | Pending |
+| TinyNet-D / TinyNet-D-attention EfficientDet | Pending | — | Pending |
 
 Use one AP50 definition for that table; preserve each checkpoint's training history
 (fresh versus subset continuation). Also retain per-class AP and class coverage.
